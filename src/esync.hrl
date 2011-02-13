@@ -3,7 +3,6 @@
 -define(REDIS_SET, 2).
 -define(REDIS_ZSET, 3).
 -define(REDIS_HASH, 4).
--define(REDIS_VMPOINTER, 8).
 
 -define(REDIS_EXPIRETIME, 253).
 -define(REDIS_SELECTDB, 254).

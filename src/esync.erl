@@ -14,7 +14,7 @@
 
 -include("esync.hrl").
 
--record(state, {tid, socket, opts, state, len_remaining, buffer}).
+-record(state, {tid, socket, opts, state, len_remaining, buffer, map}).
 
 -define(TIMEOUT, 30000).
 
@@ -42,10 +42,18 @@ init([Opts]) ->
         {ok, Socket} ->
             case authenticate(Socket, Auth) of
                 ok ->
+                    Map = init_map(),
                     init_table(Tid),
                     init_sync(Socket),
                     inet:setopts(Socket, [{active, once}]),
-                    {ok, #state{tid=Tid, socket=Socket, opts=Opts, state=loading, buffer = <<>>}};
+                    {ok, #state{
+                        tid=Tid,
+                        socket=Socket,
+                        opts=Opts,
+                        state=loading,
+                        buffer = <<>>,
+                        map=Map
+                    }};
                 Error ->
                     {stop, Error}
             end;
@@ -63,6 +71,7 @@ handle_info({tcp, Socket, Data}, #state{tid=Tid,
                                         socket=Socket,
                                         state=loading,
                                         len_remaining=undefined}=State) ->
+    io:format("~p~n", [Data]),
     {ok, Len, Rest} = parse_len(Data),
     io:format("start loading ~w chars~n", [Len]),
     {ok, Len1, Rest1, Vsn} = parse_rdb_version(Len, Rest),
@@ -75,15 +84,20 @@ handle_info({tcp, Socket, Data}, #state{tid=Tid,
 handle_info({tcp, Socket, Data}, #state{tid=Tid,
                                         socket=Socket,
                                         state=loading,
+                                        buffer=Buffer,
                                         len_remaining=Len}=State) ->
-    {ok, Len1, Rest1, NewState} = parse_keys(Len, Data, Tid),
+    io:format("~p~n", [Data]),
+    {ok, Len1, Rest1, NewState} = parse_keys(Len, <<Buffer/binary, Data/binary>>, Tid),
     inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{len_remaining=Len1, state=NewState, buffer=Rest1}};
 
-handle_info({tcp, Socket, Data}, #state{socket=Socket}=State) ->
-    io:format("~p~n", [Data]),
+handle_info({tcp, Socket, Data}, #state{tid=Tid,
+                                        socket=Socket,
+                                        buffer=Buffer,
+                                        map=Map}=State) ->
+    {ok, Rest} = parse_commands(<<Buffer/binary, Data/binary>>, Tid, Map),
     inet:setopts(Socket, [{active, once}]),
-    {noreply, State};
+    {noreply, State#state{buffer=Rest}};
 
 handle_info({tcp_closed, _}, #state{socket=Socket}=State) ->
     io:format("connection closed~n"),
@@ -128,6 +142,14 @@ authenticate(Socket, Auth) ->
         Error ->
             Error
     end.
+
+init_map() ->
+    Mods = [esync_string, esync_list, esync_set, esync_zset, esync_hash],
+    lists:foldl(fun(Mod, Acc) ->
+        lists:foldl(fun(Cmd, Acc1) ->
+            dict:store(Cmd, Mod, Acc1)
+        end, Acc, Mod:command_hooks())
+    end, dict:new(), Mods).
 
 init_table(Tid) ->
     case ets:info(Tid, protection) of
@@ -236,4 +258,69 @@ rdb_len(Len, <<Type, Rest/binary>>, _IsEncoded) ->
             <<Next:3, Rest1/binary>> = Rest,
             <<Val:4/unsigned-integer>> = <<Type, Next/binary>>,
             {ok, Val, Len-4, Rest1}
+    end.
+
+parse_commands(<<>>, _Tid, _Map) ->
+    {ok, <<>>};
+
+parse_commands(Data, Tid, Map) ->
+    parse_commands(Data, Tid, Map, Data).
+
+parse_commands(<<"*", Rest/binary>>, Tid, Map, Orig) ->
+    case parse_num(Rest, <<>>) of
+        {ok, Num, Rest1} ->
+            case parse_num_commands(Rest1, Num, []) of 
+                {ok, [Cmd|Args], Rest2} ->
+                    dispatch_cmd(Cmd, Args, Tid, Map),
+                    parse_commands(Rest2, Tid, Map);
+                {error, eof} ->
+                    {ok, Orig}
+            end;
+        {error, eof} ->
+            {ok, Orig}
+    end.
+
+dispatch_cmd(Cmd, Args, Tid, Map) ->
+    Cmd1 = string:to_lower(binary_to_list(Cmd)),
+    case dict:find(Cmd1, Map) of
+        {ok, Mod} ->
+            Mod:handle(Cmd1, Args, Tid);
+        error ->
+            io:format("unhandled command ~p~n", [Cmd1])
+    end.
+
+parse_num(<<"\r\n", Rest/binary>>, Acc) ->
+    {ok, list_to_integer(binary_to_list(Acc)), Rest};
+
+parse_num(<<"\r", _Rest/binary>>, _Acc) ->
+    {error, eof};
+
+parse_num(<<>>, _Acc) ->
+    {error, eof};
+    
+parse_num(<<Char, Rest/binary>>, Acc) ->
+    parse_num(Rest, <<Acc/binary, Char>>).
+
+parse_num_commands(Rest, 0, Acc) ->
+    {ok, lists:reverse(Acc), Rest};
+
+parse_num_commands(<<"$", Rest/binary>>, Num, Acc) ->
+    case parse_num(Rest, <<>>) of
+        {ok, Size, Rest1} ->
+            case read_string(Size, Rest1) of
+                {ok, Cmd, Rest2} ->
+                    parse_num_commands(Rest2, Num-1, [Cmd|Acc]);
+                {error, eof} ->
+                    {error, eof}
+            end;
+        {error, eof} ->
+            {error, eof}
+    end.
+
+read_string(Size, Data) ->
+    case Data of
+        <<Cmd:Size/binary, "\r\n", Rest/binary>> ->
+            {ok, Cmd, Rest};
+        _ ->
+            {error, eof}
     end.
