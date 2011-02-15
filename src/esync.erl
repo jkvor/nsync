@@ -147,6 +147,7 @@ init_map() ->
     Mods = [esync_string, esync_list, esync_set, esync_zset, esync_hash],
     lists:foldl(fun(Mod, Acc) ->
         lists:foldl(fun(Cmd, Acc1) ->
+            io:format("loading ~p:~p~n", [Mod, Cmd]),
             dict:store(Cmd, Mod, Acc1)
         end, Acc, Mod:command_hooks())
     end, dict:new(), Mods).
@@ -284,9 +285,10 @@ dispatch_cmd(Cmd, Args, Tid, Map) ->
     Cmd1 = string:to_lower(binary_to_list(Cmd)),
     case dict:find(Cmd1, Map) of
         {ok, Mod} ->
+            io:format("dispatch ~p ~p~n", [Cmd1, Args]),
             Mod:handle(Cmd1, Args, Tid);
         error ->
-            io:format("unhandled command ~p~n", [Cmd1])
+            io:format("unhandled command ~p, ~p~n", [Cmd1, Args])
     end.
 
 parse_num(<<"\r\n", Rest/binary>>, Acc) ->
