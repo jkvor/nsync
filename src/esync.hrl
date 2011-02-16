@@ -18,3 +18,4 @@
 -define(REDIS_RDB_ENC_INT32, 2). % 32 bit signed integer
 -define(REDIS_RDB_ENC_LZF, 3). % string compressed with FASTLZ
 
+

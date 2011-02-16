@@ -181,7 +181,7 @@ parse_keys(1, <<?REDIS_EOF>>, _Tid) ->
     {ok, 0, <<>>, up};
 
 parse_keys(Len, <<?REDIS_SELECTDB, Rest/binary>>, Tid) ->
-    {ok, _Db, Len1, Rest1} = rdb_len(Len-1, Rest, undefined),
+    {ok, _Enc, _Db, Len1, Rest1} = esync_utils:rdb_len(Len-1, Rest, undefined),
     parse_keys(Len1, Rest1, Tid);
 
 parse_keys(Len, <<?REDIS_STRING, Rest/binary>>, Tid) ->
@@ -192,36 +192,70 @@ parse_keys(Len, <<?REDIS_STRING, Rest/binary>>, Tid) ->
 
 parse_keys(Len, <<?REDIS_LIST, Rest/binary>>, Tid) ->
     {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, Size, Len2, Rest2} = rdb_len(Len1, Rest1, undefined),
+    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
     {ok, Vals, Len3, Rest3} = parse_list_vals(Len2, Size, Rest2, []),
     ets:insert(Tid, {Key, Vals}),
     parse_keys(Len3, Rest3, Tid);
 
 parse_keys(Len, <<?REDIS_SET, Rest/binary>>, Tid) ->
     {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, Size, Len2, Rest2} = rdb_len(Len1, Rest1, undefined),
+    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
     {ok, Vals, Len3, Rest3} = parse_list_vals(Len2, Size, Rest2, []),
     ets:insert(Tid, {Key, Vals}),
     parse_keys(Len3, Rest3, Tid);
 
 parse_keys(Len, <<?REDIS_ZSET, Rest/binary>>, Tid) ->
     {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, Size, Len2, Rest2} = rdb_len(Len1, Rest1, undefined),
+    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
     {ok, Vals, Len3, Rest3} = parse_zset_vals(Len2, Size, Rest2, []),
     ets:insert(Tid, {Key, Vals}),
     parse_keys(Len3, Rest3, Tid);    
 
 parse_keys(Len, <<?REDIS_HASH, Rest/binary>>, Tid) ->
     {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, Size, Len2, Rest2} = rdb_len(Len1, Rest1, undefined),
+    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
     {ok, Props, Len3, Rest3} = parse_hash_props(Len2, Size, Rest2, []),
     ets:insert(Tid, {Key, Props}),
     parse_keys(Len3, Rest3, Tid).
 
 parse_string(Len, Data) ->
-    {ok, Size, Len1, Rest} = rdb_len(Len, Data, undefined),
-    <<Str:Size/binary, Rest1/binary>> = Rest,
-    {ok, Str, Len1-Size, Rest1}.
+    io:format("parse_string ~w, ~p~n", [Len, Data]),
+    {ok, Enc, Size, Len1, Rest} = esync_utils:rdb_len(Len, Data, undefined),
+    io:format("enc=~p, type=~p~n", [Enc, Size]),
+    case Enc of
+        true ->
+            case lists:member(Size, [?REDIS_RDB_ENC_INT8, ?REDIS_RDB_ENC_INT16, ?REDIS_RDB_ENC_INT32]) of
+                true ->
+                    parse_integer_obj(Len1, Size, Rest);
+                false ->
+                    case Size of
+                        ?REDIS_RDB_ENC_LZF ->
+                            <<LzfLen, Rest1/binary>> = Rest,
+                            <<_UncompLen, Rest2/binary>> = Rest1,
+                            <<LzfEnc:LzfLen/binary, Rest3/binary>> = Rest2,
+                            Str = lzf:decompress(LzfEnc),
+                            {ok, Str, (Len1-2)-LzfLen, Rest3};
+                        _ ->
+                            exit("Unknown RDB encoding type")
+                    end
+            end;
+        false ->
+            <<Str:Size/binary, Rest1/binary>> = Rest,
+            {ok, Str, Len1-Size, Rest1}
+    end.
+
+
+parse_integer_obj(Len, ?REDIS_RDB_ENC_INT8, <<Char, Rest/binary>>) ->
+    {ok, Char, Len-1, Rest};
+
+parse_integer_obj(Len, ?REDIS_RDB_ENC_INT16, <<A, B, Rest/binary>>) ->
+    {ok, A bor (B bsl 8), Len-2, Rest};
+
+parse_integer_obj(Len, ?REDIS_RDB_ENC_INT32, <<A,B,C,D, Rest/binary>>) ->
+    {ok, A bor (B bsl 8) bor (C bsl 16) bor (D bsl 24), Len-4, Rest};
+
+parse_integer_obj(_Len, _Type, _Data) ->
+    exit("Unknown RDB integer encoding type").
 
 parse_list_vals(Len, 0, Rest, Acc) ->
     {ok, lists:reverse(Acc), Len, Rest};
@@ -245,21 +279,6 @@ parse_hash_props(Len, Size, Rest, Acc) ->
     {ok, Key, Len1, Rest1} = parse_string(Len, Rest),
     {ok, Val, Len2, Rest2} = parse_string(Len1, Rest1),
     parse_hash_props(Len2, Size-1, Rest2, [{Key, Val}|Acc]).
-
-rdb_len(Len, <<Type, Rest/binary>>, _IsEncoded) ->
-    case ((Type band 16#C0) bsr 6) of
-        ?REDIS_RDB_6BITLEN ->
-            {ok, Type band 16#3F, Len-1, Rest};
-        ?REDIS_RDB_ENCVAL ->
-            {ok, Type band 16#3F, Len-1, Rest};
-        ?REDIS_RDB_14BITLEN ->
-            <<Next, Rest1/binary>> = Rest,
-            {ok, ((Type band 16#3F) bsl 8) bor Next, Len-2, Rest1};
-        _ ->
-            <<Next:3, Rest1/binary>> = Rest,
-            <<Val:4/unsigned-integer>> = <<Type, Next/binary>>,
-            {ok, Val, Len-4, Rest1}
-    end.
 
 parse_commands(<<>>, _Tid, _Map) ->
     {ok, <<>>};
