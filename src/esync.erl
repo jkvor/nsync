@@ -73,8 +73,11 @@ handle_info({tcp, Socket, Data}, #state{tid=Tid,
                                         rdb_state=RdbState}=State) ->
     NewState =
         case rdb_load:packet(RdbState, Data, Tid) of
-            {error, eof} -> State#state{state=up};
-            RdbState1 -> State#state{rdb_state=RdbState1}
+            {error, eof} ->
+                error_logger:info_msg("rdb_load complete~n"),
+                State#state{state=up};
+            RdbState1 ->
+                State#state{rdb_state=RdbState1}
         end,
     inet:setopts(Socket, [{active, once}]),
     {noreply, NewState};

@@ -51,11 +51,9 @@ parse(?REDIS_SELECTDB, Data, Tid) ->
     parse(Rest, Tid);
 
 parse(Type, Data, Tid) ->
-    io:format("type ~p~n", [Type]),
     {ok, Key, Rest} = rdb_string_object(Data),
-    io:format("key ~p~n", [Key]),
+    %io:format("key ~p~n", [Key]),
     {ok, Val, Rest1} = rdb_load_object(Type, Rest),
-    io:format("val ~p~n", [Val]),
     ets:insert(Tid, {Key, Val}),
     parse(Rest1, Tid).
 
@@ -103,7 +101,6 @@ rdb_encoded_string_object(Data) ->
 
 rdb_generic_string_object(Data, _Encode) ->
     {ok, Enc, Len, Rest} = rdb_len(Data),
-    io:format("generic_string_object enc=~p len=~p~n", [Enc, Len]),
     case Enc of
         true ->
             case Len of
@@ -121,7 +118,6 @@ rdb_generic_string_object(Data, _Encode) ->
         false ->
             case Rest of
                 <<Str:Len/binary, Rest1/binary>> ->
-                    io:format("uncompressed len=~p~n", [Len]),
                     {ok, Str, Rest1};
                 _ ->
                     exit({error, eof})
@@ -158,7 +154,6 @@ rdb_lzf_string_object(Data) ->
     {ok, _Enc2, _UncompLen, Rest1} = rdb_len(Rest),
     case Rest1 of
         <<LzfEnc:LzfLen/binary, Rest2/binary>> ->
-            io:format("lzf_string_object lzflen=~p uncomplen=~p comp=~p~n", [LzfLen, _UncompLen, LzfEnc]),
             case (catch lzf:decompress(LzfEnc)) of
                 {'EXIT', _Err} ->
                     error_logger:error_msg("failed lzf_decompress(~p)~n", [LzfEnc]),
