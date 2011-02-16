@@ -185,7 +185,7 @@ rdb_load_object(?REDIS_ZSET, Data) ->
 
 rdb_load_object(?REDIS_HASH, Data) ->
     {ok, _Enc, Size, Rest} = rdb_len(Data),
-    parse_hash_props(Size, Rest, []);
+    parse_hash_props(Size, Rest, dict:new());
 
 rdb_load_object(_Type, _Data) ->
     exit("Unknown object type").
@@ -206,9 +206,9 @@ parse_zset_vals(Size, Rest, Acc) ->
     parse_zset_vals(Size-1, Rest2, [{Score, Str}|Acc]).
 
 parse_hash_props(0, Rest, Acc) ->
-    {ok, lists:reverse(Acc), Rest};
+    {ok, Acc, Rest};
 
 parse_hash_props(Size, Rest, Acc) ->
     {ok, Key, Rest1} = rdb_encoded_string_object(Rest),
     {ok, Val, Rest2} = rdb_encoded_string_object(Rest1),
-    parse_hash_props(Size-1, Rest2, [{Key, Val}|Acc]).
+    parse_hash_props(Size-1, Rest2, dict:store(Key, Val, Acc)).
