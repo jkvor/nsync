@@ -184,75 +184,167 @@ parse_keys(Len, <<?REDIS_SELECTDB, Rest/binary>>, Tid) ->
     {ok, _Enc, _Db, Len1, Rest1} = esync_utils:rdb_len(Len-1, Rest, undefined),
     parse_keys(Len1, Rest1, Tid);
 
-parse_keys(Len, <<?REDIS_STRING, Rest/binary>>, Tid) ->
-    {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, Val, Len2, Rest2} = parse_string(Len1, Rest1),
-    ets:insert(Tid, {Key, Val}),
-    parse_keys(Len2, Rest2, Tid);    
+parse_keys(_Len, <<?REDIS_EXPIRETIME, _Rest/binary>>, _Tid) ->
+    exit("WTF is expire time?");
 
-parse_keys(Len, <<?REDIS_LIST, Rest/binary>>, Tid) ->
-    {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
-    {ok, Vals, Len3, Rest3} = parse_list_vals(Len2, Size, Rest2, []),
-    ets:insert(Tid, {Key, Vals}),
-    parse_keys(Len3, Rest3, Tid);
+parse_keys(Len, <<?REDIS_STRING, Rest/binary>> = Data, Tid) ->
+    case parse_string(Len-1, Rest) of
+        {ok, Key, Len1, Rest1} ->
+            case parse_string(Len1, Rest1) of
+                {ok, Val, Len2, Rest2} ->
+                    ets:insert(Tid, {Key, Val}),
+                    parse_keys(Len2, Rest2, Tid);
+                {error, eof} ->
+                    {ok, Len, Data, loading}
+            end;
+        {error, eof} ->
+            {ok, Len, Data, loading}
+    end;
 
-parse_keys(Len, <<?REDIS_SET, Rest/binary>>, Tid) ->
-    {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
-    {ok, Vals, Len3, Rest3} = parse_list_vals(Len2, Size, Rest2, []),
-    ets:insert(Tid, {Key, Vals}),
-    parse_keys(Len3, Rest3, Tid);
+parse_keys(Len, <<?REDIS_LIST, Rest/binary>> = Data, Tid) ->
+    case parse_string(Len-1, Rest) of
+        {ok, Key, Len1, Rest1} ->
+            case esync_utils:rdb_len(Len1, Rest1, undefined) of
+                {ok, _Enc, Size, Len2, Rest2} ->
+                    case parse_list_vals(Len2, Size, Rest2, []) of 
+                        {ok, Vals, Len3, Rest3} ->
+                            ets:insert(Tid, {Key, Vals}),
+                            parse_keys(Len3, Rest3, Tid);
+                        {error, eof} ->
+                            {ok, Len, Data, loading}
+                    end;
+                {error, eof} ->
+                    {ok, Len, Data, loading}
+            end;
+        {error, eof} ->
+            {ok, Len, Data, loading}
+    end;
 
-parse_keys(Len, <<?REDIS_ZSET, Rest/binary>>, Tid) ->
-    {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
-    {ok, Vals, Len3, Rest3} = parse_zset_vals(Len2, Size, Rest2, []),
-    ets:insert(Tid, {Key, Vals}),
-    parse_keys(Len3, Rest3, Tid);    
+parse_keys(Len, <<?REDIS_SET, Rest/binary>> = Data, Tid) ->
+    case parse_string(Len-1, Rest) of
+        {ok, Key, Len1, Rest1} ->
+            case esync_utils:rdb_len(Len1, Rest1, undefined) of
+                {ok, _Enc, Size, Len2, Rest2} ->
+                    case parse_list_vals(Len2, Size, Rest2, []) of
+                        {ok, Vals, Len3, Rest3} ->
+                            ets:insert(Tid, {Key, Vals}),
+                            parse_keys(Len3, Rest3, Tid);
+                        {error, eof} ->
+                            {ok, Len, Data, loading}
+                    end;
+                {error, eof} ->
+                    {ok, Len, Data, loading}
+              end;
+        {error, eof} ->
+              {ok, Len, Data, loading}
+    end;
 
-parse_keys(Len, <<?REDIS_HASH, Rest/binary>>, Tid) ->
-    {ok, Key, Len1, Rest1} = parse_string(Len-1, Rest),
-    {ok, _Enc, Size, Len2, Rest2} = esync_utils:rdb_len(Len1, Rest1, undefined),
-    {ok, Props, Len3, Rest3} = parse_hash_props(Len2, Size, Rest2, []),
-    ets:insert(Tid, {Key, Props}),
-    parse_keys(Len3, Rest3, Tid).
+parse_keys(Len, <<?REDIS_ZSET, Rest/binary>> = Data, Tid) ->
+    case parse_string(Len-1, Rest) of
+        {ok, Key, Len1, Rest1} ->
+            case esync_utils:rdb_len(Len1, Rest1, undefined) of 
+                {ok, _Enc, Size, Len2, Rest2} ->
+                    case parse_zset_vals(Len2, Size, Rest2, []) of
+                        {ok, Vals, Len3, Rest3} ->
+                            ets:insert(Tid, {Key, Vals}),
+                            parse_keys(Len3, Rest3, Tid);    
+                        {error, eof} ->
+                            {ok, Len, Data, loading}
+                    end;
+                {error, eof} ->
+                    {ok, Len, Data, loading}
+            end;
+        {error, eof} ->
+            {ok, Len, Data, loading}
+    end;
+
+parse_keys(Len, <<?REDIS_HASH, Rest/binary>> = Data, Tid) ->
+    case parse_string(Len-1, Rest) of
+        {ok, Key, Len1, Rest1} ->
+            case esync_utils:rdb_len(Len1, Rest1, undefined) of
+                {ok, _Enc, Size, Len2, Rest2} ->
+                    case parse_hash_props(Len2, Size, Rest2, []) of
+                        {ok, Props, Len3, Rest3} ->
+                            ets:insert(Tid, {Key, Props}),
+                            parse_keys(Len3, Rest3, Tid);
+                        {error, eof} ->
+                            {ok, Len, Data, loading}
+                    end;
+                {error, eof} ->
+                    {ok, Len, Data, loading}
+            end;
+        {error, eof} ->
+            {ok, Len, Data, loading}
+    end.
 
 parse_string(Len, Data) ->
     io:format("parse_string ~w, ~p~n", [Len, Data]),
-    {ok, Enc, Size, Len1, Rest} = esync_utils:rdb_len(Len, Data, undefined),
-    io:format("enc=~p, type=~p~n", [Enc, Size]),
-    case Enc of
-        true ->
-            case lists:member(Size, [?REDIS_RDB_ENC_INT8, ?REDIS_RDB_ENC_INT16, ?REDIS_RDB_ENC_INT32]) of
+    case esync_utils:rdb_len(Len, Data, undefined) of
+        {error, eof} ->
+            {error, eof};
+        {ok, Enc, Size, Len1, Rest} ->
+            io:format("enc=~p, type=~p~n", [Enc, Size]),
+            case Enc of
                 true ->
-                    parse_integer_obj(Len1, Size, Rest);
+                    case lists:member(Size, [?REDIS_RDB_ENC_INT8, ?REDIS_RDB_ENC_INT16, ?REDIS_RDB_ENC_INT32]) of
+                        true ->
+                            parse_integer_obj(Len1, Size, Rest);
+                        false ->
+                            case Size of
+                                ?REDIS_RDB_ENC_LZF ->
+                                    case Rest of
+                                        <<LzfLen, Rest1/binary>> ->
+                                            case Rest1 of
+                                                <<_UncompLen, Rest2/binary>> ->
+                                                    case Rest2 of
+                                                        <<LzfEnc:LzfLen/binary, Rest3/binary>> ->
+                                                            case (catch lzf:decompress(LzfEnc)) of
+                                                                {'EXIT', _Err} ->
+                                                                    error_logger:error_msg("failed lzf_decompress(~s)~n", [LzfEnc]),
+                                                                    {ok, "", (Len1-2)-LzfLen, Rest3};
+                                                                Str ->
+                                                                    {ok, Str, (Len1-2)-LzfLen, Rest3}
+                                                            end;
+                                                        _ ->
+                                                            {error, eof}
+                                                    end;
+                                                _ ->
+                                                    {error, eof}
+                                            end;
+                                        _ ->
+                                            {error, eof}
+                                    end;
+                                _ ->
+                                    exit("Unknown RDB encoding type")
+                            end
+                    end;
                 false ->
-                    case Size of
-                        ?REDIS_RDB_ENC_LZF ->
-                            <<LzfLen, Rest1/binary>> = Rest,
-                            <<_UncompLen, Rest2/binary>> = Rest1,
-                            <<LzfEnc:LzfLen/binary, Rest3/binary>> = Rest2,
-                            Str = lzf:decompress(LzfEnc),
-                            {ok, Str, (Len1-2)-LzfLen, Rest3};
+                    case Rest of
+                        <<Str:Size/binary, Rest1/binary>> ->
+                            {ok, Str, Len1-Size, Rest1};
                         _ ->
-                            exit("Unknown RDB encoding type")
+                            {error, eof}
                     end
-            end;
-        false ->
-            <<Str:Size/binary, Rest1/binary>> = Rest,
-            {ok, Str, Len1-Size, Rest1}
+            end
     end.
-
 
 parse_integer_obj(Len, ?REDIS_RDB_ENC_INT8, <<Char, Rest/binary>>) ->
     {ok, Char, Len-1, Rest};
 
+parse_integer_obj(_Len, ?REDIS_RDB_ENC_INT8, _) ->
+    {error, eof};
+
 parse_integer_obj(Len, ?REDIS_RDB_ENC_INT16, <<A, B, Rest/binary>>) ->
     {ok, A bor (B bsl 8), Len-2, Rest};
 
+parse_integer_obj(_Len, ?REDIS_RDB_ENC_INT16, _) ->
+    {error, eof};
+
 parse_integer_obj(Len, ?REDIS_RDB_ENC_INT32, <<A,B,C,D, Rest/binary>>) ->
     {ok, A bor (B bsl 8) bor (C bsl 16) bor (D bsl 24), Len-4, Rest};
+
+parse_integer_obj(_Len, ?REDIS_RDB_ENC_INT32, _) ->
+    {error, eof};
 
 parse_integer_obj(_Len, _Type, _Data) ->
     exit("Unknown RDB integer encoding type").
@@ -261,24 +353,44 @@ parse_list_vals(Len, 0, Rest, Acc) ->
     {ok, lists:reverse(Acc), Len, Rest};
 
 parse_list_vals(Len, Size, Rest, Acc) ->
-    {ok, Val, Len1, Rest1} = parse_string(Len, Rest),
-    parse_list_vals(Len1, Size-1, Rest1, [Val|Acc]).
+    case parse_string(Len, Rest) of
+        {ok, Val, Len1, Rest1} ->
+            parse_list_vals(Len1, Size-1, Rest1, [Val|Acc]);
+        {error, eof} ->
+            {error, eof}
+    end.
 
 parse_zset_vals(Len, 0, Rest, Acc) ->
     {ok, lists:sort(Acc), Len, Rest};
 
 parse_zset_vals(Len, Size, Rest, Acc) ->
-    {ok, Val, Len1, Rest1} = parse_string(Len, Rest),
-    {ok, Score, Len2, Rest2} = parse_string(Len1, Rest1),
-    parse_zset_vals(Len2, Size-1, Rest2, [{Score, Val}|Acc]).
+    case parse_string(Len, Rest) of 
+        {ok, Val, Len1, Rest1} ->
+            case parse_string(Len1, Rest1) of
+                {ok, Score, Len2, Rest2} ->
+                    parse_zset_vals(Len2, Size-1, Rest2, [{Score, Val}|Acc]);
+                {error, eof} ->
+                    {error, eof}
+            end;
+        {error, eof} ->
+            {error, eof}
+    end.
 
 parse_hash_props(Len, 0, Rest, Acc) ->
     {ok, lists:reverse(Acc), Len, Rest};
 
 parse_hash_props(Len, Size, Rest, Acc) ->
-    {ok, Key, Len1, Rest1} = parse_string(Len, Rest),
-    {ok, Val, Len2, Rest2} = parse_string(Len1, Rest1),
-    parse_hash_props(Len2, Size-1, Rest2, [{Key, Val}|Acc]).
+    case parse_string(Len, Rest) of
+        {ok, Key, Len1, Rest1} ->
+            case parse_string(Len1, Rest1) of
+                {ok, Val, Len2, Rest2} ->
+                    parse_hash_props(Len2, Size-1, Rest2, [{Key, Val}|Acc]);
+                {error, eof} ->
+                    {error, eof}
+            end;
+        {error, eof} ->
+            {error, eof}
+    end.
 
 parse_commands(<<>>, _Tid, _Map) ->
     {ok, <<>>};
