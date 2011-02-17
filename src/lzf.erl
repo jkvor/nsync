@@ -4,7 +4,7 @@
 -on_load(init/0).
 
 init() ->
-    ok = erlang:load_nif("./priv/esync_drv", 0).
+    ok = erlang:load_nif("./priv/nsync_drv", 0).
 
 compress(_X) ->
     exit(nif_library_not_loaded).

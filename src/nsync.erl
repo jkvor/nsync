@@ -1,4 +1,4 @@
--module(esync).
+-module(nsync).
 -behaviour(gen_server).
 
 %% gen_server callbacks
@@ -12,7 +12,7 @@
 %% API
 -export([start_link/0, start_link/1, start_link/2]).
 
--include("esync.hrl").
+-include("nsync.hrl").
 
 -record(state, {tid, socket, opts, state, buffer, rdb_state, map}).
 
@@ -135,7 +135,7 @@ authenticate(Socket, Auth) ->
     end.
 
 init_map() ->
-    Mods = [esync_string, esync_list, esync_set, esync_zset, esync_hash],
+    Mods = [nsync_string, nsync_list, nsync_set, nsync_zset, nsync_hash],
     lists:foldl(fun(Mod, Acc) ->
         lists:foldl(fun(Cmd, Acc1) ->
             io:format("loading ~p:~p~n", [Mod, Cmd]),

@@ -3,7 +3,7 @@
 
 -record(state, {buffer}).
 
--include("esync.hrl").
+-include("nsync.hrl").
 
 packet(undefined, Data, Tid) ->
     {ok, _Len, Rest} = parse_len(Data),

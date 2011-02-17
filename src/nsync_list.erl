@@ -1,4 +1,4 @@
--module(esync_list).
+-module(nsync_list).
 -export([command_hooks/0, handle/3]).
 
 command_hooks() ->

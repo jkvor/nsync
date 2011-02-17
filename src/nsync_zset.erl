@@ -1,4 +1,4 @@
--module(esync_zset).
+-module(nsync_zset).
 -export([command_hooks/0, handle/3]).
 
 command_hooks() ->

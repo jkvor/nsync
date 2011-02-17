@@ -1,4 +1,4 @@
-{application, esync,
+{application, nsync,
  [
   {description, "Erlang redis sync client"},
   {vsn, "1.0"},
