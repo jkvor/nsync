@@ -13,11 +13,7 @@ packet(undefined, Data, Tid) ->
     packet(#state{buffer = <<>>}, Rest1, Tid);
 
 packet(#state{buffer=Buffer}, Data, Tid) ->
-    case catch parse(<<Buffer/binary, Data/binary>>, Tid) of
-        {'EXIT', {error, eof}} ->
-            #state{buffer = <<Buffer/binary, Data/binary>>};
-        {'EXIT', Err} ->
-            exit(Err);
+    case parse(<<Buffer/binary, Data/binary>>, Tid) of
         {ok, Rest} ->
             #state{buffer = Rest};
         {error, eof} ->
@@ -36,6 +32,9 @@ parse_len(<<Char, Rest/binary>>, Acc) ->
 parse_rdb_version(<<"REDIS", Vsn:4/binary, Rest/binary>>) ->
     {ok, Rest, Vsn}.
 
+parse(<<>>, _Tid) ->
+    {ok, <<>>};
+
 parse(Data, Tid) ->
     {ok, Type, Rest} = rdb_type(Data),
     parse(Type, Rest, Tid).
@@ -47,15 +46,33 @@ parse(?REDIS_EOF, <<>>, _Tid) ->
     {error, eof};
 
 parse(?REDIS_SELECTDB, Data, Tid) ->
-    {ok, _Enc, _Db, Rest} = rdb_len(Data),
-    parse(Rest, Tid);
+    case catch rdb_len(Data) of
+        {'EXIT', {error, eof}} ->
+            {ok, <<?REDIS_SELECTDB, Data/binary>>};
+        {ok, _Enc, _Db, Rest} ->
+            parse(Rest, Tid)
+    end;
+
+parse(Type, <<>>, _Tid) ->
+    {ok, <<Type>>};
 
 parse(Type, Data, Tid) ->
-    {ok, Key, Rest} = rdb_string_object(Data),
-    %io:format("key ~p~n", [Key]),
-    {ok, Val, Rest1} = rdb_load_object(Type, Rest),
-    ets:insert(Tid, {Key, Val}),
-    parse(Rest1, Tid).
+    case catch rdb_string_object(Data) of
+        {'EXIT', {error, eof}} ->
+            {ok, <<Type, Data/binary>>};
+        {'EXIT', Err} ->
+            exit(Err);
+        {ok, Key, Rest} ->
+            case catch rdb_load_object(Type, Rest) of
+                {'EXIT', {error, eof}} ->
+                    {ok, <<Type, Data/binary>>};
+                {'EXIT', Err} ->
+                    exit(Err);
+                {ok, Val, Rest1} ->
+                    ets:insert(Tid, {Key, Val}),
+                    parse(Rest1, Tid)
+            end
+    end.
 
 rdb_type(<<Type, Rest/binary>>) ->
     {ok, Type, Rest};
@@ -188,6 +205,7 @@ rdb_load_object(?REDIS_HASH, Data) ->
     parse_hash_props(Size, Rest, dict:new());
 
 rdb_load_object(_Type, _Data) ->
+    io:format("unknown object type: ~p~n", [_Type]),
     exit("Unknown object type").
 
 parse_list_vals(0, Rest, Acc) ->
