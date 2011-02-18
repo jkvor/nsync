@@ -1,4 +1,5 @@
 ebin/*
 src/*.swp
+src/*/*.swp
 c_src/*.o
 priv/*.so
