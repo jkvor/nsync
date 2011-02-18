@@ -1,3 +1,7 @@
+# About
+
+nsync is an Erlang application that acts as a redis slave. When the nsync process starts, it opens a tcp socket to the redis server and issues a "SYNC" command.  Redis asynchronously dumps the dataset to disk and transfers it to the nsync slave.  Once the rdb dump has been sent to the slave, subsequent commands are replicated using the redis text protocol. 
+
 # Build
 
    $ rebar compile
