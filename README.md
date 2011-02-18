@@ -47,7 +47,7 @@
     
 ### Example1: Custom callback
 
-see src/examples/example1.erl
+see [example1.erl](https://github.com/JacobVorreuter/nsync/blob/master/src/examples/example1.erl)
 
     $ erl -pa ebin
     1> example1:sync().
