@@ -4,7 +4,7 @@ nsync is an Erlang application that acts as a redis slave. When the nsync proces
 
 # Build
 
-   $ rebar compile
+   $ ./rebar compile
  
 # Examples
 
