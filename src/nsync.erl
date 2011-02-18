@@ -157,7 +157,12 @@ authenticate(Socket, Auth) ->
     end.
 
 default_callback() ->
-    ets:new(?MODULE, [protected, named_table, set]),
+    case ets:info(?MODULE, protection) of
+        undefined ->
+            ets:new(?MODULE, [protected, named_table, set]);
+        _ ->
+            exit("Default nsync ets table already defined")
+    end,
     fun({load, _K, _V}) ->
           ?MODULE;
        ({load, eof}) ->

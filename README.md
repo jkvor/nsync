@@ -1,4 +1,10 @@
-## Examples
+# Build
+
+   $ rebar compile
+ 
+# Examples
+
+### PREREQUISITE: Populating redis data
 
     $ ./redis-cli
     redis> flushdb
@@ -17,11 +23,35 @@
     3) "bar:two"
     4) "bar:one"
 
-    $ rebar compile
+### Basic async sync
+
     $ erl -pa ebin
-    1> example:sync().
+    1> nsync:start_link().
+    {ok,<0.33.0>}
+    2> ets:tab2list(nsync).
+    [{<<"foo">>,<<"monkey">>},
+     {<<"bar:one">>,<<"seahorse">>},
+     {<<"bar:two">>,<<"jellyfish">>},
+     {<<"foo:one">>,<<"donkey">>}]
+
+### Basic blocking sync
+
+    $ erl -pa ebin
+    1> nsync:start_link([{block, true}]).
+    {ok,<0.33.0>}
+    2> ets:tab2list(nsync).
+    [{<<"foo">>,<<"monkey">>},
+     {<<"bar:one">>,<<"seahorse">>},
+     {<<"bar:two">>,<<"jellyfish">>},
+     {<<"foo:one">>,<<"donkey">>}]
+    
+### Example1: Custom callback
+
+see src/examples/example1.erl
+
+    $ erl -pa ebin
+    1> example1:sync().
     ok
-    finished loading rdb dump
     2> ets:tab2list(foo).
     [{<<"foo">>,<<"monkey">>},
      {<<"foo:one">>,<<"donkey">>}]
