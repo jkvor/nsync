@@ -10,11 +10,12 @@
          code_change/3]).
 
 %% API
--export([start_link/0, start_link/1, start_link/2]).
+-export([start_link/0, start_link/1]).
 
 -include("nsync.hrl").
 
--record(state, {tid, socket, opts, state, buffer, rdb_state, map}).
+-record(state, {callback, caller_pid, socket, opts, 
+                state, buffer, rdb_state, map}).
 
 -define(TIMEOUT, 30000).
 
@@ -25,29 +26,45 @@ start_link() ->
     start_link([]).
 
 start_link(Opts) ->
-    gen_server:start_link(?MODULE, [Opts], []).
-
-start_link(Name, Opts) ->
-    gen_server:start_link({local, Name}, ?MODULE, [Opts], []).
+    case proplists:get_value(block, Opts) of
+        true ->
+            case gen_server:start_link(?MODULE, [Opts, self()], []) of
+                {ok, Pid} ->
+                    receive
+                        {Pid, load_complete} ->
+                            {ok, Pid}
+                    after ?TIMEOUT ->
+                        {error, timeout}
+                    end;
+                Err ->
+                    Err
+            end;
+        _ ->
+            gen_server:start_link(?MODULE, [Opts, undefined], [])
+    end.
 
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
-init([Opts]) ->
+init([Opts, CallerPid]) ->
     Host = proplists:get_value(host, Opts, "localhost"),
     Port = proplists:get_value(port, Opts, 6379),
     Auth = proplists:get_value(auth, Opts),
-    Tid  = proplists:get_value(tid, Opts, ?MODULE),
+    Callback =
+        case proplists:get_value(callback, Opts) of
+            undefined -> default_callback();
+            Cb -> Cb
+        end,
     case open_socket(Host, Port) of
         {ok, Socket} ->
             case authenticate(Socket, Auth) of
                 ok ->
                     Map = init_map(),
-                    init_table(Tid),
                     init_sync(Socket),
                     inet:setopts(Socket, [{active, once}]),
                     {ok, #state{
-                        tid=Tid,
+                        callback=Callback,
+                        caller_pid=CallerPid,
                         socket=Socket,
                         opts=Opts,
                         state=loading,
@@ -67,14 +84,19 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({tcp, Socket, Data}, #state{tid=Tid,
+handle_info({tcp, Socket, Data}, #state{callback=Callback,
+                                        caller_pid=CallerPid,
                                         socket=Socket,
                                         state=loading,
                                         rdb_state=RdbState}=State) ->
     NewState =
-        case rdb_load:packet(RdbState, Data, Tid) of
+        case rdb_load:packet(RdbState, Data, Callback) of
             {error, eof} ->
-                error_logger:info_msg("rdb_load complete~n"),
+                case CallerPid of
+                    undefined -> ok;
+                    _ -> CallerPid ! {self(), load_complete}
+                end,
+                nsync_utils:do_callback(Callback, [{load, eof}]),
                 State#state{state=up};
             RdbState1 ->
                 State#state{rdb_state=RdbState1}
@@ -82,11 +104,11 @@ handle_info({tcp, Socket, Data}, #state{tid=Tid,
     inet:setopts(Socket, [{active, once}]),
     {noreply, NewState};
 
-handle_info({tcp, Socket, Data}, #state{tid=Tid,
+handle_info({tcp, Socket, Data}, #state{callback=Callback,
                                         socket=Socket,
                                         buffer=Buffer,
                                         map=Map}=State) ->
-    {ok, Rest} = parse_commands(<<Buffer/binary, Data/binary>>, Tid, Map),
+    {ok, Rest} = parse_commands(<<Buffer/binary, Data/binary>>, Callback, Map),
     inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{buffer=Rest}};
 
@@ -134,41 +156,42 @@ authenticate(Socket, Auth) ->
             Error
     end.
 
+default_callback() ->
+    ets:new(?MODULE, [protected, named_table, set]),
+    fun({load, _K, _V}) ->
+          ?MODULE;
+       ({load, eof}) ->
+          ok;
+       ({cmd, _Cmd, _Args}) ->
+          ?MODULE;
+       (_) ->
+          undefined
+    end.
+
 init_map() ->
     Mods = [nsync_string, nsync_list, nsync_set, nsync_zset, nsync_hash],
     lists:foldl(fun(Mod, Acc) ->
         lists:foldl(fun(Cmd, Acc1) ->
-            io:format("loading ~p:~p~n", [Mod, Cmd]),
             dict:store(Cmd, Mod, Acc1)
         end, Acc, Mod:command_hooks())
     end, dict:new(), Mods).
 
-init_table(Tid) ->
-    case ets:info(Tid, protection) of
-        undefined ->
-            ets:new(Tid, [protected, named_table, set]);
-        public ->
-            Tid;
-        _ ->
-            exit({error, cannot_write_to_table})
-    end.
-
 init_sync(Socket) ->
     gen_tcp:send(Socket, <<"SYNC\r\n">>).
 
-parse_commands(<<>>, _Tid, _Map) ->
+parse_commands(<<>>, _Callback, _Map) ->
     {ok, <<>>};
 
-parse_commands(Data, Tid, Map) ->
-    parse_commands(Data, Tid, Map, Data).
+parse_commands(Data, Callback, Map) ->
+    parse_commands(Data, Callback, Map, Data).
 
-parse_commands(<<"*", Rest/binary>>, Tid, Map, Orig) ->
+parse_commands(<<"*", Rest/binary>>, Callback, Map, Orig) ->
     case parse_num(Rest, <<>>) of
         {ok, Num, Rest1} ->
             case parse_num_commands(Rest1, Num, []) of 
                 {ok, [Cmd|Args], Rest2} ->
-                    dispatch_cmd(Cmd, Args, Tid, Map),
-                    parse_commands(Rest2, Tid, Map);
+                    dispatch_cmd(Cmd, Args, Callback, Map),
+                    parse_commands(Rest2, Callback, Map);
                 {error, eof} ->
                     {ok, Orig}
             end;
@@ -176,12 +199,16 @@ parse_commands(<<"*", Rest/binary>>, Tid, Map, Orig) ->
             {ok, Orig}
     end.
 
-dispatch_cmd(Cmd, Args, Tid, Map) ->
+dispatch_cmd(Cmd, Args, Callback, Map) ->
     Cmd1 = string:to_lower(binary_to_list(Cmd)),
     case dict:find(Cmd1, Map) of
         {ok, Mod} ->
-            io:format("dispatch ~p ~p~n", [Cmd1, Args]),
-            Mod:handle(Cmd1, Args, Tid);
+            case nsync_utils:do_callback(Callback, {cmd, Cmd1, Args}) of
+                undefined ->
+                    ok;
+                Tid -> 
+                    Mod:handle(Cmd1, Args, Tid)
+            end;
         error ->
             io:format("unhandled command ~p, ~p~n", [Cmd1, Args])
     end.

@@ -5,15 +5,14 @@
 
 -include("nsync.hrl").
 
-packet(undefined, Data, Tid) ->
+packet(undefined, Data, Callback) ->
     {ok, _Len, Rest} = parse_len(Data),
     {ok, Rest1, Vsn} = parse_rdb_version(Rest),
-    io:format("version ~s~n", [Vsn]),
     Vsn /= <<"0001">> andalso exit({error, vsn_not_supported}),
-    packet(#state{buffer = <<>>}, Rest1, Tid);
+    packet(#state{buffer = <<>>}, Rest1, Callback);
 
-packet(#state{buffer=Buffer}, Data, Tid) ->
-    case parse(<<Buffer/binary, Data/binary>>, Tid) of
+packet(#state{buffer=Buffer}, Data, Callback) ->
+    case parse(<<Buffer/binary, Data/binary>>, Callback) of
         {ok, Rest} ->
             #state{buffer = Rest};
         {error, eof} ->
@@ -32,31 +31,31 @@ parse_len(<<Char, Rest/binary>>, Acc) ->
 parse_rdb_version(<<"REDIS", Vsn:4/binary, Rest/binary>>) ->
     {ok, Rest, Vsn}.
 
-parse(<<>>, _Tid) ->
+parse(<<>>, _Callback) ->
     {ok, <<>>};
 
-parse(Data, Tid) ->
+parse(Data, Callback) ->
     {ok, Type, Rest} = rdb_type(Data),
-    parse(Type, Rest, Tid).
+    parse(Type, Rest, Callback).
 
-parse(?REDIS_EXPIRETIME, _Data, _Tid) ->
+parse(?REDIS_EXPIRETIME, _Data, _Callback) ->
     exit("WTF is expire time?");
 
-parse(?REDIS_EOF, <<>>, _Tid) ->
+parse(?REDIS_EOF, <<>>, _Callback) ->
     {error, eof};
 
-parse(?REDIS_SELECTDB, Data, Tid) ->
+parse(?REDIS_SELECTDB, Data, Callback) ->
     case catch rdb_len(Data) of
         {'EXIT', {error, eof}} ->
             {ok, <<?REDIS_SELECTDB, Data/binary>>};
         {ok, _Enc, _Db, Rest} ->
-            parse(Rest, Tid)
+            parse(Rest, Callback)
     end;
 
-parse(Type, <<>>, _Tid) ->
+parse(Type, <<>>, _Callback) ->
     {ok, <<Type>>};
 
-parse(Type, Data, Tid) ->
+parse(Type, Data, Callback) ->
     case catch rdb_string_object(Data) of
         {'EXIT', {error, eof}} ->
             {ok, <<Type, Data/binary>>};
@@ -69,9 +68,17 @@ parse(Type, Data, Tid) ->
                 {'EXIT', Err} ->
                     exit(Err);
                 {ok, Val, Rest1} ->
-                    ets:insert(Tid, {Key, Val}),
-                    parse(Rest1, Tid)
+                    write(Callback, Key, Val),
+                    parse(Rest1, Callback)
             end
+    end.
+
+write(Callback, Key, Val) ->
+    case nsync_utils:do_callback(Callback, [{load, Key, Val}]) of
+        undefined ->
+            ok;
+        Tid ->
+            ets:insert(Tid, {Key, Val})
     end.
 
 rdb_type(<<Type, Rest/binary>>) ->
