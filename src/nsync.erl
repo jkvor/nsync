@@ -18,6 +18,12 @@
                 state, buffer, rdb_state, map}).
 
 -define(TIMEOUT, 30000).
+-define(CALLBACK_MODS, [nsync_string,
+                        nsync_list,
+                        nsync_set,
+                        nsync_zset,
+                        nsync_hash,
+                        nsync_pubsub]).
 
 %%====================================================================
 %% API functions
@@ -205,12 +211,11 @@ default_callback(Reconnect) ->
     end.
 
 init_map() ->
-    Mods = [nsync_string, nsync_list, nsync_set, nsync_zset, nsync_hash],
     lists:foldl(fun(Mod, Acc) ->
         lists:foldl(fun(Cmd, Acc1) ->
             dict:store(Cmd, Mod, Acc1)
         end, Acc, Mod:command_hooks())
-    end, dict:new(), Mods).
+    end, dict:new(), ?CALLBACK_MODS).
 
 init_sync(Socket) ->
     gen_tcp:send(Socket, <<"SYNC\r\n">>).
