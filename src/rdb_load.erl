@@ -15,8 +15,8 @@ packet(#state{buffer=Buffer}, Data, Callback) ->
     case parse(<<Buffer/binary, Data/binary>>, Callback) of
         {ok, Rest} ->
             #state{buffer = Rest};
-        {error, eof} ->
-            {error, eof}
+        {eof, Rest} ->
+            {eof, Rest}
     end.
 
 parse_len(<<"$", Rest/binary>>) ->
@@ -38,11 +38,16 @@ parse(Data, Callback) ->
     {ok, Type, Rest} = rdb_type(Data),
     parse(Type, Rest, Callback).
 
-parse(?REDIS_EXPIRETIME, _Data, _Callback) ->
-    exit("WTF is expire time?");
+parse(?REDIS_EXPIRETIME, Data, Callback) ->
+    case Data of
+        <<_Time:32/unsigned-integer, Rest/binary>> ->
+            parse(Rest, Callback);
+        _ ->
+            {ok, <<?REDIS_EXPIRETIME, Data/binary>>}
+    end;
 
-parse(?REDIS_EOF, <<>>, _Callback) ->
-    {error, eof};
+parse(?REDIS_EOF, Rest, _Callback) ->
+    {eof, Rest};
 
 parse(?REDIS_SELECTDB, Data, Callback) ->
     case catch rdb_len(Data) of
