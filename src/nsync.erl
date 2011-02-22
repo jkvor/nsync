@@ -26,6 +26,7 @@ start_link() ->
     start_link([]).
 
 start_link(Opts) ->
+    Timeout = proplists:get_value(timeout, Opts, 1000 * 60 * 6),
     case proplists:get_value(block, Opts) of
         true ->
             case gen_server:start_link(?MODULE, [Opts, self()], []) of
@@ -33,7 +34,7 @@ start_link(Opts) ->
                     receive
                         {Pid, load_complete} ->
                             {ok, Pid}
-                    after ?TIMEOUT ->
+                    after Timeout ->
                         {error, timeout}
                     end;
                 Err ->
