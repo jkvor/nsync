@@ -63,3 +63,6 @@ see [example1.erl](https://github.com/JacobVorreuter/nsync/blob/master/src/examp
     [{<<"bar:one">>,<<"seahorse">>},
      {<<"bar:two">>,<<"jellyfish">>}]
 
+# Exception Handling
+
+nsync re-establishes the tcp connection and re-issues the SYNC command when the socket is closed. A tuple of the form, {error, closed} is sent to the callback when the socket closes and the {load, eof} tuple is sent to the callback when the rdb sync is complete.

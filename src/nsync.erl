@@ -47,33 +47,9 @@ start_link(Opts) ->
 %% gen_server callbacks
 %%====================================================================
 init([Opts, CallerPid]) ->
-    Host = proplists:get_value(host, Opts, "localhost"),
-    Port = proplists:get_value(port, Opts, 6379),
-    Auth = proplists:get_value(auth, Opts),
-    Callback =
-        case proplists:get_value(callback, Opts) of
-            undefined -> default_callback();
-            Cb -> Cb
-        end,
-    case open_socket(Host, Port) of
-        {ok, Socket} ->
-            case authenticate(Socket, Auth) of
-                ok ->
-                    Map = init_map(),
-                    init_sync(Socket),
-                    inet:setopts(Socket, [{active, once}]),
-                    {ok, #state{
-                        callback=Callback,
-                        caller_pid=CallerPid,
-                        socket=Socket,
-                        opts=Opts,
-                        state=loading,
-                        buffer = <<>>,
-                        map=Map
-                    }};
-                Error ->
-                    {stop, Error}
-            end;
+    case init_state(Opts, CallerPid, false) of
+        {ok, State} ->
+            {ok, State};
         Error ->
             {stop, Error}
     end.
@@ -112,15 +88,29 @@ handle_info({tcp, Socket, Data}, #state{callback=Callback,
     inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{buffer=Rest}};
 
-handle_info({tcp_closed, _}, #state{socket=Socket}=State) ->
-    io:format("connection closed~n"),
+handle_info({tcp_closed, _}, #state{callback=Callback,
+                                    opts=Opts,
+                                    socket=Socket}=State) ->
     catch gen_tcp:close(Socket),
-    {stop, normal, State};
+    nsync_utils:do_callback(Callback, [{error, closed}]),
+    case init_state(Opts, undefined, true) of
+        {ok, State1} ->
+            {noreply, State1};
+        Error ->
+            {stop, Error, State}
+    end;
 
-handle_info({tcp_error, _ ,_}, #state{socket=Socket}=State) ->
-    io:format("tcp_error~n"),
+handle_info({tcp_error, _ ,_}, #state{callback=Callback,
+                                      opts=Opts,
+                                      socket=Socket}=State) ->
     catch gen_tcp:close(Socket),
-    {stop, normal, State};
+    nsync_utils:do_callback(Callback, [{error, closed}]),
+    case init_state(Opts, undefined, true) of
+        {ok, State1} ->
+            {noreply, State1};
+        Error ->
+            {stop, Error, State}
+    end;
 
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -134,6 +124,38 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 %% internal functions
 %%====================================================================
+init_state(Opts, CallerPid, Reconnect) ->
+    Host = proplists:get_value(host, Opts, "localhost"),
+    Port = proplists:get_value(port, Opts, 6379),
+    Auth = proplists:get_value(auth, Opts),
+    Callback =
+        case proplists:get_value(callback, Opts) of
+            undefined -> default_callback(Reconnect);
+            Cb -> Cb
+        end,
+    case open_socket(Host, Port) of
+        {ok, Socket} ->
+            case authenticate(Socket, Auth) of
+                ok ->
+                    Map = init_map(),
+                    init_sync(Socket),
+                    inet:setopts(Socket, [{active, once}]),
+                    {ok, #state{
+                        callback=Callback,
+                        caller_pid=CallerPid,
+                        socket=Socket,
+                        opts=Opts,
+                        state=loading,
+                        buffer = <<>>,
+                        map=Map
+                    }};
+                Error ->
+                    Error
+            end;
+        Error ->
+            Error
+    end.
+
 open_socket(Host, Port) when is_list(Host), is_integer(Port) ->
     gen_tcp:connect(Host, Port, [binary, {packet, raw}, {active, false}]);
 
@@ -156,17 +178,21 @@ authenticate(Socket, Auth) ->
             Error
     end.
 
-default_callback() ->
+default_callback(Reconnect) ->
     case ets:info(?MODULE, protection) of
         undefined ->
             ets:new(?MODULE, [protected, named_table, set]);
-        _ ->
+        _ when Reconnect ->
+            ets:delete_all_objects(?MODULE);
+        _ when not Reconnect ->
             exit("Default nsync ets table already defined")
     end,
     fun({load, _K, _V}) ->
           ?MODULE;
        ({load, eof}) ->
           ok;
+       ({error, Error}) ->
+          error_logger:error_report([?MODULE, {error, Error}]);
        ({cmd, _Cmd, _Args}) ->
           ?MODULE;
        (_) ->
@@ -215,7 +241,7 @@ dispatch_cmd(Cmd, Args, Callback, Map) ->
                     Mod:handle(Cmd1, Args, Tid)
             end;
         error ->
-            io:format("unhandled command ~p, ~p~n", [Cmd1, Args])
+            catch nsync_utils:do_callback(Callback, {error, {unhandled_command, Cmd1}}) 
     end.
 
 parse_num(<<"\r\n", Rest/binary>>, Acc) ->
