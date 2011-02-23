@@ -60,7 +60,10 @@ parse_num_commands(<<"$", Rest/binary>>, Num, Acc) ->
             end;
         {error, eof} ->
             {error, eof}
-    end.
+    end;
+
+parse_num_commands(_, _Num, _Acc) ->
+    {error, eof}.
 
 read_string(Size, Data) ->
     case Data of
