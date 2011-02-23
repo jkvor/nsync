@@ -17,7 +17,8 @@ handle("smove", [Source, Dest, Member], Tid) ->
     Set2 = lookup(Tid, Dest),
     NewSet1 = lists:delete(Member, Set1),
     NewSet2 = lists:usort([Member|Set2]),
-    ets:insert(Tid, [{Source, NewSet1}, {Dest, NewSet2}]).
+    ets:insert(Tid, [{Source, NewSet1}, {Dest, NewSet2}]),
+    NewSet1 == [] andalso ets:delete(Tid, Source).
 
 lookup(Tid, Key) ->
     case ets:lookup(Tid, Key) of
