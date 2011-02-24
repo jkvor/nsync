@@ -1,35 +1,85 @@
 -module(rdb_load).
 -export([packet/3]).
 
--record(state, {buffer}).
+-record(state, {first = true, buffer = <<>>}).
 
 -include("nsync.hrl").
 
-packet(undefined, Data, Callback) ->
-    {ok, _Len, Rest} = parse_len(Data),
-    {ok, Rest1, Vsn} = parse_rdb_version(Rest),
-    Vsn /= <<"0001">> andalso exit({error, vsn_not_supported}),
-    packet(#state{buffer = <<>>}, Rest1, Callback);
+packet(State, Data, Callback) when State == undefined orelse State#state.first == true ->
+    Data1 =
+        case State of
+            undefined -> Data;
+            #state{buffer=Buffer} -> <<Buffer/binary, Data/binary>>
+        end,
+    case check_packet(Data1) of
+        {ok, line, Line} ->
+            {error, Line};
+        {ok, Rest} ->
+            case parse_len(Rest) of
+                {ok, _Len, Rest1} ->
+                    case parse_rdb_version(Rest1) of 
+                        {ok, Rest2, Vsn} ->
+                            Vsn /= <<"0001">> andalso exit({error, vsn_not_supported}),
+                            packet(#state{buffer = <<>>, first = false}, Rest2, Callback);
+                        {error, eof} ->
+                            #state{buffer = Data}
+                    end;
+                {error, eof} ->
+                    #state{buffer = Data}
+            end;
+        {error, eof} ->
+            #state{buffer = Data}
+    end;
 
 packet(#state{buffer=Buffer}, Data, Callback) ->
     case parse(<<Buffer/binary, Data/binary>>, Callback) of
         {ok, Rest} ->
-            #state{buffer = Rest};
+            #state{buffer = Rest, first = false};
         {eof, Rest} ->
             {eof, Rest}
     end.
 
+check_packet(<<Char, _/binary>> = Data) when Char == $-; Char == $+ ->
+    case read_line(Data) of
+        {ok, Line, <<>>} ->
+            {ok, line, Line};
+        {ok, _Line, Rest} ->
+            {ok, Rest};
+        {error, eof} ->
+            {error, eof}
+    end;
+
+check_packet(Data) ->
+    {ok, Data}.
+
+read_line(Data) ->
+    read_line(Data, <<>>).
+
+read_line(<<"\r\n", Rest/binary>>, Acc) ->
+    {ok, Acc, Rest};
+
+read_line(<<>>, _Acc) ->
+    {error, eof};
+
+read_line(<<Char, Rest/binary>>, Acc) ->
+    read_line(Rest, <<Acc/binary, Char>>).
+
+parse_len(<<>>) ->
+    {error, eof};
+
 parse_len(<<"$", Rest/binary>>) ->
-    parse_len(Rest, []).
-
-parse_len(<<"\r\n", Rest/binary>>, Acc) ->
-    {ok, list_to_integer(lists:reverse(Acc)), Rest};
-
-parse_len(<<Char, Rest/binary>>, Acc) ->
-    parse_len(Rest, [Char|Acc]).
+    case read_line(Rest) of
+        {ok, Line, Rest1} ->
+            {ok, list_to_integer(binary_to_list(Line)), Rest1};
+        {error, eof} ->
+            {error, eof}
+    end.
 
 parse_rdb_version(<<"REDIS", Vsn:4/binary, Rest/binary>>) ->
-    {ok, Rest, Vsn}.
+    {ok, Rest, Vsn};
+
+parse_rdb_version(_) ->
+    {error, eof}.
 
 parse(<<>>, _Callback) ->
     {ok, <<>>};

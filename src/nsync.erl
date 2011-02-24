@@ -83,6 +83,11 @@ handle_info({tcp, Socket, Data}, #state{callback=Callback,
                 nsync_utils:do_callback(Callback, [{load, eof}]),
                 {ok, Rest1} = redis_text_proto:parse_commands(Rest, Callback, Map),
                 State#state{state=up, buffer=Rest1};
+            {error, <<"-LOADING", _/binary>> = Msg} ->
+                error_logger:info_report([?MODULE, Msg]), 
+                timer:sleep(1000),
+                init_sync(Socket),
+                State;
             RdbState1 ->
                 State#state{rdb_state=RdbState1}
         end,
@@ -102,7 +107,7 @@ handle_info({tcp_closed, _}, #state{callback=Callback,
                                     socket=Socket}=State) ->
     catch gen_tcp:close(Socket),
     nsync_utils:do_callback(Callback, [{error, closed}]),
-    case init_state(Opts, undefined, true) of
+    case reconnect(Opts) of
         {ok, State1} ->
             {noreply, State1};
         Error ->
@@ -114,7 +119,7 @@ handle_info({tcp_error, _ ,_}, #state{callback=Callback,
                                       socket=Socket}=State) ->
     catch gen_tcp:close(Socket),
     nsync_utils:do_callback(Callback, [{error, closed}]),
-    case init_state(Opts, undefined, true) of
+    case reconnect(Opts) of    
         {ok, State1} ->
             {noreply, State1};
         Error ->
@@ -133,6 +138,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 %% internal functions
 %%====================================================================
+reconnect(Opts) ->
+    case init_state(Opts, undefined, true) of
+        {ok, State} ->
+            {ok, State};
+        {error, Err} when Err == econnrefused; Err == closed ->
+            timer:sleep(250),
+            reconnect(Opts);
+        Err ->
+            Err
+    end.
+
 init_state(Opts, CallerPid, Reconnect) ->
     Host = proplists:get_value(host, Opts, "localhost"),
     Port = proplists:get_value(port, Opts, 6379),
@@ -201,7 +217,7 @@ default_callback(Reconnect) ->
     fun({load, _K, _V}) ->
           ?MODULE;
        ({load, eof}) ->
-          ok;
+          error_logger:info_report([?MODULE, {load, eof}]);
        ({error, Error}) ->
           error_logger:error_report([?MODULE, {error, Error}]);
        ({cmd, _Cmd, _Args}) ->
