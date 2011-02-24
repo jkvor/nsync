@@ -132,7 +132,8 @@ write(Callback, Key, Val) ->
     case nsync_utils:do_callback(Callback, [{load, Key, Val}]) of
         undefined ->
             ok;
-        Tid ->
+        Name ->
+            Tid = nsync_utils:lookup_write_tid(nsync_tids, Name),
             ets:insert(Tid, {Key, Val})
     end.
 

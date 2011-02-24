@@ -10,7 +10,7 @@
          code_change/3]).
 
 %% API
--export([start_link/0, start_link/1]).
+-export([start_link/0, start_link/1, tid/0, tid/1]).
 
 -include("nsync.hrl").
 
@@ -50,11 +50,18 @@ start_link(Opts) ->
             gen_server:start_link(?MODULE, [Opts, undefined], [])
     end.
 
+tid() ->
+    tid(?MODULE).
+
+tid(Name) ->
+    nsync_utils:lookup_read_tid(nsync_tids, Name).
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
 init([Opts, CallerPid]) ->
-    case init_state(Opts, CallerPid, false) of
+    ets:new(nsync_tids, [named_table, protected, set]),
+    case init_state(Opts, CallerPid) of
         {ok, State} ->
             {ok, State};
         Error ->
@@ -76,6 +83,7 @@ handle_info({tcp, Socket, Data}, #state{callback=Callback,
     NewState =
         case rdb_load:packet(RdbState, Data, Callback) of
             {eof, Rest} ->
+                nsync_utils:failover_tids(nsync_tids),
                 case CallerPid of
                     undefined -> ok;
                     _ -> CallerPid ! {self(), load_complete}
@@ -107,6 +115,7 @@ handle_info({tcp_closed, _}, #state{callback=Callback,
                                     socket=Socket}=State) ->
     catch gen_tcp:close(Socket),
     nsync_utils:do_callback(Callback, [{error, closed}]),
+    nsync_utils:reset_write_tids(nsync_tids),
     case reconnect(Opts) of
         {ok, State1} ->
             {noreply, State1};
@@ -119,6 +128,7 @@ handle_info({tcp_error, _ ,_}, #state{callback=Callback,
                                       socket=Socket}=State) ->
     catch gen_tcp:close(Socket),
     nsync_utils:do_callback(Callback, [{error, closed}]),
+    nsync_utils:reset_write_tids(nsync_tids),
     case reconnect(Opts) of    
         {ok, State1} ->
             {noreply, State1};
@@ -139,7 +149,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% internal functions
 %%====================================================================
 reconnect(Opts) ->
-    case init_state(Opts, undefined, true) of
+    case init_state(Opts, undefined) of
         {ok, State} ->
             {ok, State};
         {error, Err} when Err == econnrefused; Err == closed ->
@@ -149,13 +159,13 @@ reconnect(Opts) ->
             Err
     end.
 
-init_state(Opts, CallerPid, Reconnect) ->
+init_state(Opts, CallerPid) ->
     Host = proplists:get_value(host, Opts, "localhost"),
     Port = proplists:get_value(port, Opts, 6379),
     Auth = proplists:get_value(auth, Opts),
     Callback =
         case proplists:get_value(callback, Opts) of
-            undefined -> default_callback(Reconnect);
+            undefined -> default_callback();
             Cb -> Cb
         end,
     case open_socket(Host, Port) of
@@ -205,15 +215,7 @@ authenticate(Socket, Auth) ->
             Error
     end.
 
-default_callback(Reconnect) ->
-    case ets:info(?MODULE, protection) of
-        undefined ->
-            ets:new(?MODULE, [protected, named_table, set]);
-        _ when Reconnect ->
-            ets:delete_all_objects(?MODULE);
-        _ when not Reconnect ->
-            exit("Default nsync ets table already defined")
-    end,
+default_callback() ->
     fun({load, _K, _V}) ->
           ?MODULE;
        ({load, eof}) ->

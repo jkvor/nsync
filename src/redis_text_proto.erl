@@ -27,7 +27,8 @@ dispatch_cmd(Cmd, Args, Callback, Map) ->
             case nsync_utils:do_callback(Callback, [{cmd, Cmd1, Args}]) of
                 undefined ->
                     ok;
-                Tid -> 
+                Name -> 
+                    Tid = nsync_utils:lookup_write_tid(nsync_tids, Name),                    
                     Mod:handle(Cmd1, Args, Tid)
             end;
         error ->
