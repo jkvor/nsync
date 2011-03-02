@@ -32,7 +32,7 @@ nsync is an Erlang application that acts as a redis slave. When the nsync proces
     $ erl -pa ebin
     1> nsync:start_link().
     {ok,<0.33.0>}
-    2> ets:tab2list(nsync).
+    2> ets:tab2list(nsync:tid()).
     [{<<"foo">>,<<"monkey">>},
      {<<"bar:one">>,<<"seahorse">>},
      {<<"bar:two">>,<<"jellyfish">>},
@@ -43,7 +43,7 @@ nsync is an Erlang application that acts as a redis slave. When the nsync proces
     $ erl -pa ebin
     1> nsync:start_link([{block, true}]).
     {ok,<0.33.0>}
-    2> ets:tab2list(nsync).
+    2> ets:tab2list(nsync:tid()).
     [{<<"foo">>,<<"monkey">>},
      {<<"bar:one">>,<<"seahorse">>},
      {<<"bar:two">>,<<"jellyfish">>},
@@ -56,10 +56,10 @@ see [example1.erl](https://github.com/JacobVorreuter/nsync/blob/master/src/examp
     $ erl -pa ebin
     1> example1:sync().
     ok
-    2> ets:tab2list(foo).
+    2> ets:tab2list(nsync:tid(foo)).
     [{<<"foo">>,<<"monkey">>},
      {<<"foo:one">>,<<"donkey">>}]
-    3> ets:tab2list(bar).
+    3> ets:tab2list(nsync:tid(bar)).
     [{<<"bar:one">>,<<"seahorse">>},
      {<<"bar:two">>,<<"jellyfish">>}]
 
