@@ -160,9 +160,9 @@ reconnect(Opts) ->
     end.
 
 init_state(Opts, CallerPid) ->
-    Host = proplists:get_value(host, Opts, "localhost"),
+    Host = proplists:get_value(ip, Opts, "localhost"),
     Port = proplists:get_value(port, Opts, 6379),
-    Auth = proplists:get_value(auth, Opts),
+    Auth = proplists:get_value(pass, Opts),
     Callback =
         case proplists:get_value(callback, Opts) of
             undefined -> default_callback();
