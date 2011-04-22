@@ -27,6 +27,8 @@
 
 parse_commands(<<>>, _Callback, _Map) ->
     {ok, <<>>};
+parse_commands(<<"PING", _/binary>>, _Callback, _Map) ->
+    {ok, <<>>};
 
 parse_commands(<<"*", Rest/binary>>, Callback, Map) ->
     case parse_num(Rest, <<>>) of
