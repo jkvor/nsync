@@ -24,7 +24,7 @@
 -export([command_hooks/0, handle/3]).
 
 command_hooks() ->
-    ["lpush", "lpop", "rpush", "rpop"].
+    ["lpush", "lpop", "rpush", "rpop", "lrem"].
 
 handle("lpush", [Key, Val], Tid) ->
     List = lookup(Tid, Key),
@@ -48,7 +48,12 @@ handle("rpop", [Key], Tid) ->
             ets:insert(Tid, {Key, lists:reverse(Tail)});
         [] ->
             ok
-    end.
+    end;
+
+handle("lrem", [Key, Val], Tid) ->
+    List = lookup(Tid, Key),
+    ets:insert(Tid, {Key, lists:dropwhile(fun(Elem) -> Elem =:= Val end, List)}).
+
 
 lookup(Tid, Key) ->
     case ets:lookup(Tid, Key) of
