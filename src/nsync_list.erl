@@ -50,9 +50,10 @@ handle("rpop", [Key], Tid) ->
             ok
     end;
 
-handle("lrem", [Key, Val], Tid) ->
+handle("lrem", [Key, Count, Val], Tid) ->
     List = lookup(Tid, Key),
-    ets:insert(Tid, {Key, lists:dropwhile(fun(Elem) -> Elem =:= Val end, List)}).
+    N = list_to_integer(binary_to_list(Count)),
+    ets:insert(Tid, {Key, lrem(List, N, Val)}).
 
 
 lookup(Tid, Key) ->
@@ -61,3 +62,37 @@ lookup(Tid, Key) ->
         [] -> []
     end.
 
+%%===================================================================
+%% internal functions
+%%===================================================================
+
+%% Redis lrem command, which removes the first count occurrences of
+%% elements equal to value from the list:
+%%  count > 0: Remove elements equal to value moving from head to tail.
+%%  count < 0: Remove elements equal to value moving from tail to head.
+%%  count = 0: Remove all elements equal to value.
+%%
+lrem(List, Count, Val) when Count == 0 ->
+    lists:dropwhile(fun(Elem) -> Elem =:= Val end, List);
+lrem(List, Count, Val) when Count > 0 ->
+    {_, NewList} = lists:foldl(
+                        fun(Elem, Acc) ->
+                            {N, L} = Acc,
+                            case {N, Elem =:= Val} of
+                                {0, _}      -> {N, [Elem | L]};
+                                {_, true}   -> {N - 1, L};
+                                _           -> {N, [Elem | L]}
+                            end
+                        end, {Count, []}, List),
+    lists:reverse(NewList);
+lrem(List, Count, Val) when Count < 0 ->
+    {_, NewList} = lists:foldr(
+                        fun(Elem, Acc) ->
+                            {N, L} = Acc,
+                            case {N, Elem =:= Val} of
+                                {0, _}      -> {N, [Elem | L]};
+                                {_, true}   -> {N + 1, L};
+                                _           -> {N, [Elem | L]}
+                            end
+                        end, {Count, []}, List),
+    NewList.
