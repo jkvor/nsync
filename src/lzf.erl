@@ -26,7 +26,12 @@
 -on_load(init/0).
 
 init() ->
-    ok = erlang:load_nif("./priv/nsync_drv", 0).
+    case erlang:load_nif("./priv/nsync_drv", 0) of
+        ok -> ok;
+        _ ->
+            Filename = filename:join([code:lib_dir(nsync), "priv", "nsync_drv"]),
+            ok = erlang:load_nif(Filename, 0)
+    end.
 
 compress(_X) ->
     exit(nif_library_not_loaded).
