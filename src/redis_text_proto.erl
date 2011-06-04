@@ -48,13 +48,8 @@ dispatch_cmd(Cmd, Args, Callback, Map) ->
     Cmd1 = string:to_lower(binary_to_list(Cmd)),
     case dict:find(Cmd1, Map) of
         {ok, Mod} ->
-            case nsync_utils:do_callback(Callback, [{cmd, Cmd1, Args}]) of
-                undefined ->
-                    ok;
-                Name -> 
-                    Tid = nsync_utils:lookup_write_tid(nsync_tids, Name),                    
-                    Mod:handle(Cmd1, Args, Tid)
-            end;
+            nsync_utils:do_callback(Callback, [{cmd, Cmd1, Args}]),
+            ok;
         error ->
             catch nsync_utils:do_callback(Callback, [{error, {unhandled_command, Cmd1}}]) 
     end.

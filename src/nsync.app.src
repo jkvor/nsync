@@ -1,6 +1,6 @@
 {application, nsync,
  [
-  {description, "Erlang redis sync client"},
+  {description, "Erlang redis replication client"},
   {vsn, "1.0"},
   {registered, []},
   {applications, [kernel,stdlib]},

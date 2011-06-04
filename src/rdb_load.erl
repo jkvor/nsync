@@ -151,13 +151,8 @@ parse(Type, Data, Callback) ->
     end.
 
 write(Callback, Key, Val) ->
-    case nsync_utils:do_callback(Callback, [{load, Key, Val}]) of
-        undefined ->
-            ok;
-        Name ->
-            Tid = nsync_utils:lookup_write_tid(nsync_tids, Name),
-            ets:insert(Tid, {Key, Val})
-    end.
+    nsync_utils:do_callback(Callback, [{load, Key, Val}]),
+    ok.
 
 rdb_type(<<Type, Rest/binary>>) ->
     {ok, Type, Rest};
