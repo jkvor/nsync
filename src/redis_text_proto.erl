@@ -35,23 +35,14 @@ parse_commands(<<"*", Rest/binary>>, Callback, Map) ->
         {ok, Num, Rest1} ->
             case parse_num_commands(Rest1, Num, []) of 
                 {ok, [Cmd|Args], Rest2} ->
-                    dispatch_cmd(Cmd, Args, Callback, Map),
+                    Cmd1 = string:to_lower(binary_to_list(Cmd)),
+                    nsync_utils:do_callback(Callback, [{cmd, Cmd1, Args}]),
                     parse_commands(Rest2, Callback, Map);
                 {error, eof} ->
                     {ok, <<"*", Rest/binary>>}
             end;
         {error, eof} ->
             {ok, <<"*", Rest/binary>>}
-    end.
-
-dispatch_cmd(Cmd, Args, Callback, Map) ->
-    Cmd1 = string:to_lower(binary_to_list(Cmd)),
-    case dict:find(Cmd1, Map) of
-        {ok, Mod} ->
-            nsync_utils:do_callback(Callback, [{cmd, Cmd1, Args}]),
-            ok;
-        error ->
-            catch nsync_utils:do_callback(Callback, [{error, {unhandled_command, Cmd1}}]) 
     end.
 
 parse_num(<<"\r\n", Rest/binary>>, Acc) ->
