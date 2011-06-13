@@ -21,23 +21,23 @@
 %% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
 -module(redis_text_proto).
--export([parse_commands/3]).
+-export([parse_commands/2]).
 
 -include("nsync.hrl").
 
-parse_commands(<<>>, _Callback, _Map) ->
+parse_commands(<<>>, _Callback) ->
     {ok, <<>>};
-parse_commands(<<"PING\r\n", Rest/binary>>, _Callback, _Map) ->
+parse_commands(<<"PING\r\n", Rest/binary>>, _Callback) ->
     {ok, Rest};
 
-parse_commands(<<"*", Rest/binary>>, Callback, Map) ->
+parse_commands(<<"*", Rest/binary>>, Callback) ->
     case parse_num(Rest, <<>>) of
         {ok, Num, Rest1} ->
             case parse_num_commands(Rest1, Num, []) of 
                 {ok, [Cmd|Args], Rest2} ->
                     Cmd1 = string:to_lower(binary_to_list(Cmd)),
                     nsync_utils:do_callback(Callback, [{cmd, Cmd1, Args}]),
-                    parse_commands(Rest2, Callback, Map);
+                    parse_commands(Rest2, Callback);
                 {error, eof} ->
                     {ok, <<"*", Rest/binary>>}
             end;

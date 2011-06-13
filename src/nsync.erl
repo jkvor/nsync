@@ -37,7 +37,7 @@
 -include("nsync.hrl").
 
 -record(state, {callback, caller_pid, socket, opts, 
-                state, buffer, rdb_state, map}).
+                state, buffer, rdb_state}).
 
 -define(TIMEOUT, 30000).
 -define(CALLBACK_MODS, [nsync_string,
@@ -92,7 +92,6 @@ handle_cast(_Msg, State) ->
 handle_info({tcp, Socket, Data}, #state{callback=Callback,
                                         caller_pid=CallerPid,
                                         socket=Socket,
-                                        map=Map,
                                         state=loading,
                                         rdb_state=RdbState}=State) ->
     NewState =
@@ -103,7 +102,7 @@ handle_info({tcp, Socket, Data}, #state{callback=Callback,
                     _ -> CallerPid ! {self(), load_complete}
                 end,
                 nsync_utils:do_callback(Callback, [{load, eof}]),
-                {ok, Rest1} = redis_text_proto:parse_commands(Rest, Callback, Map),
+                {ok, Rest1} = redis_text_proto:parse_commands(Rest, Callback),
                 State#state{state=up, buffer=Rest1};
             {error, <<"-LOADING", _/binary>> = Msg} ->
                 error_logger:info_report([?MODULE, Msg]), 
@@ -118,9 +117,8 @@ handle_info({tcp, Socket, Data}, #state{callback=Callback,
 
 handle_info({tcp, Socket, Data}, #state{callback=Callback,
                                         socket=Socket,
-                                        buffer=Buffer,
-                                        map=Map}=State) ->
-    {ok, Rest} = redis_text_proto:parse_commands(<<Buffer/binary, Data/binary>>, Callback, Map),
+                                        buffer=Buffer}=State) ->
+    {ok, Rest} = redis_text_proto:parse_commands(<<Buffer/binary, Data/binary>>, Callback),
     inet:setopts(Socket, [{active, once}]),
     {noreply, State#state{buffer=Rest}};
 
@@ -184,7 +182,6 @@ init_state(Opts, CallerPid) ->
         {ok, Socket} ->
             case authenticate(Socket, Auth) of
                 ok ->
-                    Map = init_map(),
                     init_sync(Socket),
                     inet:setopts(Socket, [{active, once}]),
                     {ok, #state{
@@ -193,8 +190,7 @@ init_state(Opts, CallerPid) ->
                         socket=Socket,
                         opts=Opts,
                         state=loading,
-                        buffer = <<>>,
-                        map=Map
+                        buffer = <<>>
                     }};
                 Error ->
                     Error
@@ -231,13 +227,6 @@ default_callback() ->
     fun(Arg) ->
           io:format("nsync ~1000p~n", [Arg])
     end.
-
-init_map() ->
-    lists:foldl(fun(Mod, Acc) ->
-        lists:foldl(fun(Cmd, Acc1) ->
-            dict:store(Cmd, Mod, Acc1)
-        end, Acc, Mod:command_hooks())
-    end, dict:new(), ?CALLBACK_MODS).
 
 init_sync(Socket) ->
     gen_tcp:send(Socket, <<"SYNC\r\n">>).
