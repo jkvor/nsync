@@ -89,6 +89,9 @@ read_line(<<Char, Rest/binary>>, Acc) ->
 parse_len(<<>>) ->
     {error, eof};
 
+parse_len(<<"\n">>) ->
+    {error, eof};
+
 parse_len(<<"$", Rest/binary>>) ->
     case read_line(Rest) of
         {ok, Line, Rest1} ->
