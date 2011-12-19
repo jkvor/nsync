@@ -27,11 +27,9 @@
 
 parse_commands(<<>>, _Callback) ->
     {ok, <<>>};
-parse_commands(<<"PING\r\n", Rest/binary>>, _Callback) ->
-    {ok, Rest};
 
 parse_commands(<<"*", Rest/binary>>, Callback) ->
-    case parse_num(Rest, <<>>) of
+    case read_line(Rest, <<>>) of
         {ok, Num, Rest1} ->
             case parse_num_commands(Rest1, Num, []) of 
                 {ok, [Cmd|Args], Rest2} ->
@@ -43,25 +41,33 @@ parse_commands(<<"*", Rest/binary>>, Callback) ->
             end;
         {error, eof} ->
             {ok, <<"*", Rest/binary>>}
+    end;
+
+parse_commands(Buffer, _Callback) ->
+    case read_line(Buffer, <<>>) of
+        {ok, _Line, Rest} ->
+            {ok, Rest};
+        {error, eof} ->
+            {ok, Buffer}
     end.
 
-parse_num(<<"\r\n", Rest/binary>>, Acc) ->
+read_line(<<"\r\n", Rest/binary>>, Acc) ->
     {ok, list_to_integer(binary_to_list(Acc)), Rest};
 
-parse_num(<<"\r", _Rest/binary>>, _Acc) ->
+read_line(<<"\r", _Rest/binary>>, _Acc) ->
     {error, eof};
 
-parse_num(<<>>, _Acc) ->
+read_line(<<>>, _Acc) ->
     {error, eof};
     
-parse_num(<<Char, Rest/binary>>, Acc) ->
-    parse_num(Rest, <<Acc/binary, Char>>).
+read_line(<<Char, Rest/binary>>, Acc) ->
+    read_line(Rest, <<Acc/binary, Char>>).
 
 parse_num_commands(Rest, 0, Acc) ->
     {ok, lists:reverse(Acc), Rest};
 
 parse_num_commands(<<"$", Rest/binary>>, Num, Acc) ->
-    case parse_num(Rest, <<>>) of
+    case read_line(Rest, <<>>) of
         {ok, Size, Rest1} ->
             case read_string(Size, Rest1) of
                 {ok, Cmd, Rest2} ->
