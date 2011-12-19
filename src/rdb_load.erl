@@ -71,6 +71,12 @@ check_packet(<<Char, _/binary>> = Data) when Char == $-; Char == $+ ->
             {error, eof}
     end;
 
+check_packet(<<"\r\n", Data/binary>>) ->
+    {ok, Data};
+
+check_packet(<<"\n", Data/binary>>) ->
+    {ok, Data};
+
 check_packet(Data) ->
     {ok, Data}.
 
