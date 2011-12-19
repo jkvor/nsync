@@ -30,7 +30,8 @@ parse_commands(<<>>, _Callback) ->
 
 parse_commands(<<"*", Rest/binary>>, Callback) ->
     case read_line(Rest, <<>>) of
-        {ok, Num, Rest1} ->
+        {ok, Num0, Rest1} ->
+            Num = list_to_integer(binary_to_list(Num0)),
             case parse_num_commands(Rest1, Num, []) of 
                 {ok, [Cmd|Args], Rest2} ->
                     Cmd1 = string:to_lower(binary_to_list(Cmd)),
@@ -52,7 +53,7 @@ parse_commands(Buffer, _Callback) ->
     end.
 
 read_line(<<"\r\n", Rest/binary>>, Acc) ->
-    {ok, list_to_integer(binary_to_list(Acc)), Rest};
+    {ok, Acc, Rest};
 
 read_line(<<"\r", _Rest/binary>>, _Acc) ->
     {error, eof};
@@ -68,7 +69,8 @@ parse_num_commands(Rest, 0, Acc) ->
 
 parse_num_commands(<<"$", Rest/binary>>, Num, Acc) ->
     case read_line(Rest, <<>>) of
-        {ok, Size, Rest1} ->
+        {ok, Size0, Rest1} ->
+            Size = list_to_integer(binary_to_list(Size0)),
             case read_string(Size, Rest1) of
                 {ok, Cmd, Rest2} ->
                     parse_num_commands(Rest2, Num-1, [Cmd|Acc]);
