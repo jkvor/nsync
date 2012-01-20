@@ -81,16 +81,12 @@ check_packet(Data) ->
     {ok, Data}.
 
 read_line(Data) ->
-    read_line(Data, <<>>).
-
-read_line(<<"\r\n", Rest/binary>>, Acc) ->
-    {ok, Acc, Rest};
-
-read_line(<<>>, _Acc) ->
-    {error, eof};
-
-read_line(<<Char, Rest/binary>>, Acc) ->
-    read_line(Rest, <<Acc/binary, Char>>).
+    case binary:split(Data, <<"\r\n">>) of
+        [_] -> {error, eof};
+        [] -> {error, eof};
+        [Line,Rest] ->
+            {ok, Line, Rest}
+    end.
 
 parse_len(<<>>) ->
     {error, eof};
