@@ -41,7 +41,9 @@ packet(State, Data, Callback) when State == undefined orelse State#state.first =
                 {ok, _Len, Rest1} ->
                     case parse_rdb_version(Rest1) of 
                         {ok, Rest2, Vsn} ->
-                            Vsn /= <<"0001">> andalso exit({error, vsn_not_supported}),
+                            lists:member(Vsn, [<<"0001">>,<<"0002">>,<<"0003">>,
+                                               <<"0004">>,<<"0005">>,<<"0006">>])
+                             orelse exit({error, vsn_not_supported}),
                             packet(#state{buffer = <<>>, first = false}, Rest2, Callback);
                         {error, eof} ->
                             #state{buffer = Data}
@@ -115,12 +117,19 @@ parse(Data, Callback) ->
     {ok, Type, Rest} = rdb_type(Data),
     parse(Type, Rest, Callback).
 
-parse(?REDIS_EXPIRETIME, Data, Callback) ->
+parse(?REDIS_EXPIRETIME_MS, Data, Callback) ->
+    case Data of
+        <<_Time:64/unsigned-integer, Rest/binary>> ->
+            parse(Rest, Callback);
+        _ ->
+            {ok, <<?REDIS_EXPIRETIME_MS, Data/binary>>}
+    end;
+parse(?REDIS_EXPIRETIME_SEC, Data, Callback) ->
     case Data of
         <<_Time:32/unsigned-integer, Rest/binary>> ->
             parse(Rest, Callback);
         _ ->
-            {ok, <<?REDIS_EXPIRETIME, Data/binary>>}
+            {ok, <<?REDIS_EXPIRETIME_SEC, Data/binary>>}
     end;
 
 parse(?REDIS_EOF, Rest, _Callback) ->
@@ -215,7 +224,7 @@ rdb_generic_string_object(Data, _Encode) ->
                 ?REDIS_RDB_ENC_LZF ->
                     rdb_lzf_string_object(Rest);
                 _ ->
-                    exit("Unknown RDB encoding type")
+                    exit({"Unknown RDB encoding type", Len})
             end;
         false ->
             case Rest of
@@ -289,8 +298,28 @@ rdb_load_object(?REDIS_HASH, Data) ->
     {ok, _Enc, Size, Rest} = rdb_len(Data),
     parse_hash_props(Size, Rest, dict:new());
 
+rdb_load_object(?REDIS_ZMAP, Data) ->
+    {ok, List, Rest} = parse_zmap_vals(Data),
+    Dict = to_hash(List),
+    {ok, Dict, Rest};
+
+rdb_load_object(?REDIS_ZLIST, Data) ->
+    parse_zlist_vals(Data);
+
+rdb_load_object(?REDIS_INTSET, Data) ->
+    parse_intset_vals(Data);
+
+rdb_load_object(?REDIS_SSZLIST, Data) ->
+    {ok, List, Rest} = parse_zlist_vals(Data),
+    Set = to_sorted_set(List),
+    {ok, Set, Rest};
+
+rdb_load_object(?REDIS_HMAPZLIST, Data) ->
+    {ok, List, Rest} = parse_zlist_vals(Data),
+    Dict = to_hash(List),
+    {ok, Dict, Rest};
+
 rdb_load_object(_Type, _Data) ->
-    io:format("unknown object type: ~p~n", [_Type]),
     exit("Unknown object type").
 
 parse_list_vals(0, Rest, Acc) ->
@@ -315,3 +344,104 @@ parse_hash_props(Size, Rest, Acc) ->
     {ok, Key, Rest1} = rdb_encoded_string_object(Rest),
     {ok, Val, Rest2} = rdb_encoded_string_object(Rest1),
     parse_hash_props(Size-1, Rest2, dict:store(Key, Val, Acc)).
+
+
+parse_zmap_vals(Data) ->
+    {ok, Str, Rest1} = rdb_encoded_string_object(Data),
+    <<_:8/unsigned-little, Rest/binary>> = Str,
+    {ok, parse_zmap_entry(Rest), Rest1}.
+
+parse_zmap_entry(<<255>>) ->
+    [];
+parse_zmap_entry(<<253, Len:32/little-unsigned, Entries/binary>>) ->
+    <<Entry:Len/binary, Free, ToSkip/binary>> = Entries,
+    <<_:Free/binary, Rest/binary>> = ToSkip,
+    [maybe_int(Entry) | parse_zmap_entry(Rest)];
+parse_zmap_entry(<<Len:8, Entries/binary>>) ->
+    <<Entry:Len/binary, Free, ToSkip/binary>> = Entries,
+    <<_:Free/binary, Rest/binary>> = ToSkip,
+    [maybe_int(Entry) | parse_zmap_entry(Rest)].
+
+
+maybe_int(Bin) ->
+    try
+        _ = list_to_integer(L = binary_to_list(Bin)),
+        L
+    catch
+        error:badarg ->
+            Bin
+    end.
+
+parse_zlist_vals(Data) ->
+    {ok, Str, Rest1} = rdb_encoded_string_object(Data),
+    <<_ZlBytes:32/little-unsigned,
+      _ZlTail:32/little-unsigned,
+      ZlLen:16/little-unsigned,
+      Entries/binary>> = Str,
+      {ok, parse_zlist_entries(ZlLen, Entries), Rest1}.
+
+parse_zlist_entries(0, <<255>>) ->
+    [];
+parse_zlist_entries(Len, <<254:8/unsigned, _Prev:32, Entries/binary>>) ->
+    {Entry, Rest} = parse_zlist_entry(Entries),
+    [Entry | parse_zlist_entries(Len-1, Rest)];
+parse_zlist_entries(Len, <<_Prev:8/unsigned, Entries/binary>>) ->
+    {Entry, Rest} = parse_zlist_entry(Entries),
+    [Entry | parse_zlist_entries(Len-1, Rest)].
+
+%% String value with length less than or equal to 63 bytes (6 bits).
+parse_zlist_entry(<<0:2, Len:6/little-unsigned, Entries/binary>>) ->
+    <<Entry:Len/binary, Rest/binary>> = Entries,
+    {Entry, Rest};
+%% String value with length less than or equal to 16383 bytes (14 bits).
+parse_zlist_entry(<<0:1,1:1, Len:14/little-unsigned, Entries/binary>>) ->
+    <<Entry:Len/binary, Rest/binary>> = Entries,
+    {Entry, Rest};
+%% String value with length greater than or equal to 16384 bytes.
+parse_zlist_entry(<<1:1,0:1,_:6, Len:32/little-unsigned, Entries/binary>>) ->
+    <<Entry:Len/binary, Rest/binary>> = Entries,
+    {Entry, Rest};
+%% Read next 2 bytes as a 16 bit signed integer
+parse_zlist_entry(<<1:1,1:1,0:2,_:4, Int:16/little-signed, Rest/binary>>) ->
+    {integer_to_list(Int), Rest};
+%% Read next 4 bytes as a 32 bit signed integer
+parse_zlist_entry(<<1:1,1:1,0:1,1:1,_:4, Int:32/little-signed, Rest/binary>>) ->
+    {integer_to_list(Int), Rest};
+%% Read next 8 bytes as a 64 bit signed integer
+parse_zlist_entry(<<1:1,1:1,1:1,0:1,_:4, Int:64/little-signed, Rest/binary>>) ->
+    {integer_to_list(Int), Rest};
+%% Read next 3 bytes as a 24 bit signed integer
+parse_zlist_entry(<<1:1,1:1,1:1,1:1,0:4, Int:24/little-signed, Rest/binary>>) ->
+    {integer_to_list(Int), Rest};
+%% Read next byte as an 8 bit signed integer
+parse_zlist_entry(<<1:1, 1:1, 1:1, 1:1, 1:1, 1:1, 1:1, 0:1, Int:8/little-signed, Rest/binary>>) ->
+    {integer_to_list(Int), Rest};
+%% immediate 4 bit integer. Unsigned integer from 0 to 12.
+%% The encoded value is actually from 1 to 13 because 0000 and 1111 can not
+%% be used, so 1 should be subtracted from the encoded 4 bit value to
+%% obtain the right value
+parse_zlist_entry(<<1:1,1:1,1:1,1:1, Val:4/little-unsigned, Rest/binary>>) ->
+    {integer_to_list(Val-1), Rest}.
+
+parse_intset_vals(Data) ->
+    {ok, Str, Rest1} = rdb_encoded_string_object(Data),
+    <<Encoding:32/little-unsigned, % byte size of integers
+      Length:32/little-unsigned,
+      Entries/binary>> = Str,
+      {ok, parse_intset_entries(Encoding*8,Length,Entries), Rest1}.
+
+parse_intset_entries(_Size, 0, <<>>) ->
+    [];
+parse_intset_entries(Size, N, Entries) ->
+    <<Int:Size/little-signed, Rest/binary>> = Entries,
+    [integer_to_list(Int) | parse_intset_entries(Size, N-1, Rest)].
+
+to_hash(L) -> to_hash(L, dict:new()).
+
+to_hash([], Dict) -> Dict;
+to_hash([K,V|L], Dict) -> to_hash(L, dict:store(K,V,Dict)).
+
+to_sorted_set(L) -> lists:sort(to_set(L)).
+
+to_set([]) -> [];
+to_set([Val,Weight|L]) -> [{Weight, Val} | to_set(L)].
