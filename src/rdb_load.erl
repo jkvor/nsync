@@ -1,5 +1,5 @@
 %% Copyright (c) 2011 Jacob Vorreuter <jacob.vorreuter@gmail.com>
-%% 
+%%
 %% Permission is hereby granted, free of charge, to any person
 %% obtaining a copy of this software and associated documentation
 %% files (the "Software"), to deal in the Software without
@@ -8,10 +8,10 @@
 %% copies of the Software, and to permit persons to whom the
 %% Software is furnished to do so, subject to the following
 %% conditions:
-%% 
+%%
 %% The above copyright notice and this permission notice shall be
 %% included in all copies or substantial portions of the Software.
-%% 
+%%
 %% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 %% EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
 %% OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -39,7 +39,7 @@ packet(State, Data, Callback) when State == undefined orelse State#state.first =
         {ok, Rest} ->
             case parse_len(Rest) of
                 {ok, _Len, Rest1} ->
-                    case parse_rdb_version(Rest1) of 
+                    case parse_rdb_version(Rest1) of
                         {ok, Rest2, Vsn} ->
                             lists:member(Vsn, [<<"0001">>,<<"0002">>,<<"0003">>,
                                                <<"0004">>,<<"0005">>,<<"0006">>])
@@ -205,7 +205,7 @@ rdb_len(<<Type, Rest/binary>>) ->
     end.
 
 rdb_string_object(Data) ->
-    rdb_generic_string_object(Data, false). 
+    rdb_generic_string_object(Data, false).
 
 rdb_encoded_string_object(Data) ->
     rdb_generic_string_object(Data, true).
@@ -277,7 +277,7 @@ rdb_lzf_string_object(Data) ->
     end.
 
 rdb_load_object(_Type, <<>>) ->
-    exit({error, eof});    
+    exit({error, eof});
 
 rdb_load_object(?REDIS_STRING, Data) ->
     rdb_encoded_string_object(Data);
