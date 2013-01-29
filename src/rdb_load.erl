@@ -21,11 +21,19 @@
 %% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
 -module(rdb_load).
--export([packet/3]).
+-export([packet/3
+         ,load_file/2
+        ]).
 
 -record(state, {first = true, buffer = <<>>}).
 
 -include("nsync.hrl").
+
+load_file(FileName, Callback) ->
+    {ok, File} = file:read_file(FileName),
+    Data = iolist_to_binary(["$", integer_to_list(byte_size(File)),
+                             "\r\n", File]),
+    packet(undefined, Data, Callback).
 
 packet(State, Data, Callback) when State == undefined orelse State#state.first == true ->
     Data1 =
@@ -262,12 +270,12 @@ rdb_double_value(Data) ->
 
 rdb_lzf_string_object(Data) ->
     {ok, _Enc1, LzfLen, Rest} = rdb_len(Data),
-    {ok, _Enc2, _UncompLen, Rest1} = rdb_len(Rest),
+    {ok, _Enc2, UncompLen, Rest1} = rdb_len(Rest),
     case Rest1 of
         <<LzfEnc:LzfLen/binary, Rest2/binary>> ->
-            case (catch lzf:decompress(LzfEnc)) of
+            case (catch lzf:decompress(LzfEnc, UncompLen)) of
                 {'EXIT', _Err} ->
-                    error_logger:error_msg("failed lzf_decompress(~p)~n", [LzfEnc]),
+                    error_logger:error_msg("failed lzf_decompress(~p, ~p)~n", [LzfEnc, UncompLen]),
                     {ok, <<"">>, Rest2};
                 Str ->
                     {ok, Str, Rest2}
