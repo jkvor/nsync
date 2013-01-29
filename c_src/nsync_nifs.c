@@ -94,19 +94,20 @@ static ERL_NIF_TERM decompress2_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     ERL_NIF_TERM retval;
     ErlNifBinary source;
     ErlNifBinary target;
-    ErlNifUInt64 decompressed_length;
+    unsigned int decompressed_length;
     unsigned int final_length;
 
     if (argc != 2 ||
         !enif_inspect_binary(env, argv[0], &source) ||
-        !enif_get_uint64(env, argv[1], &decompressed_length) ||
+        !enif_get_uint(env, argv[1], &decompressed_length) ||
         decompressed_length < source.size ||
         !enif_alloc_binary_compat(env, decompressed_length, &target)) {
         return enif_make_badarg(env);
     }
 
-    final_length = lzf_compress(source.data, source.size, target.data, target.size);
-    if (final_length > 0) {
+    final_length = lzf_decompress(source.data, source.size, target.data, target.size);
+    if (final_length > 0 &&
+        final_length == decompressed_length) {
         enif_realloc_binary_compat(env, &target, final_length);
         retval = enif_make_binary(env, &target);
     } else {
