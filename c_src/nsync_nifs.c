@@ -33,7 +33,7 @@ int decompress1(ErlNifEnv *env, ErlNifBinary *source, ErlNifBinary *target) {
     int bufsize;
     double expansion_factor = 1.1;
     unsigned int result;
-    while(expansion_factor < 2.5) {
+    while(expansion_factor < 6) {
         bufsize = (int) source->size * expansion_factor;
         bufsize = bufsize < 66 ? 66 : bufsize;
         enif_alloc_binary_compat(env, bufsize, target);
@@ -56,7 +56,7 @@ int compress1(ErlNifEnv *env, ErlNifBinary *source, ErlNifBinary *target) {
     int bufsize;
     double expansion_factor = 1.1;
     int result;
-    while(expansion_factor < 2.5) {
+    while(expansion_factor < 6) {
         bufsize = (int) source->size * expansion_factor;
         bufsize = bufsize < 66 ? 66 : bufsize; 
         enif_alloc_binary_compat(env, bufsize, target);
@@ -89,6 +89,32 @@ static ERL_NIF_TERM decompress_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
     }
     return retval;
 }
+
+static ERL_NIF_TERM decompress2_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    ERL_NIF_TERM retval;
+    ErlNifBinary source;
+    ErlNifBinary target;
+    ErlNifUInt64 decompressed_length;
+    unsigned int final_length;
+
+    if (argc != 2 ||
+        !enif_inspect_binary(env, argv[0], &source) ||
+        !enif_get_uint64(env, argv[1], &decompressed_length) ||
+        decompressed_length < source.size ||
+        !enif_alloc_binary_compat(env, decompressed_length, &target)) {
+        return enif_make_badarg(env);
+    }
+
+    final_length = lzf_compress(source.data, source.size, target.data, target.size);
+    if (final_length > 0) {
+        enif_realloc_binary_compat(env, &target, final_length);
+        retval = enif_make_binary(env, &target);
+    } else {
+        enif_release_binary_compat(env, &target);
+        retval = enif_make_badarg(env);
+    }
+    return retval;
+}
     
 ERL_NIF_TERM compress_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     ERL_NIF_TERM retval;
@@ -109,6 +135,7 @@ ERL_NIF_TERM compress_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
 
 static ErlNifFunc nif_funcs[] = {
     {"decompress", 1, decompress_nif},
+    {"decompress", 2, decompress2_nif},
     {"compress", 1, compress_nif}
 };
 

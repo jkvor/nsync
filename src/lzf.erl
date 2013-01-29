@@ -21,7 +21,9 @@
 %% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
 -module(lzf).
--export([compress/1, decompress/1]).
+-export([compress/1
+         ,decompress/1
+         ,decompress/2]).
 
 -on_load(init/0).
 
@@ -39,3 +41,5 @@ compress(_X) ->
 decompress(_X) ->
     exit(nif_library_not_loaded).
 
+decompress(_, _) ->
+    exit(nif_library_not_loaded).
