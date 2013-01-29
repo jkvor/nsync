@@ -4,7 +4,14 @@
 -define(REDIS_ZSET, 3).
 -define(REDIS_HASH, 4).
 
--define(REDIS_EXPIRETIME, 253).
+-define(REDIS_ZMAP, 9).
+-define(REDIS_ZLIST, 10).
+-define(REDIS_INTSET, 11).
+-define(REDIS_SSZLIST, 12).
+-define(REDIS_HMAPZLIST, 13).
+
+-define(REDIS_EXPIRETIME_MS, 252).
+-define(REDIS_EXPIRETIME_SEC, 253).
 -define(REDIS_SELECTDB, 254).
 -define(REDIS_EOF, 255).
 
