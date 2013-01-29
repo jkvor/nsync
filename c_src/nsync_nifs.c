@@ -33,7 +33,7 @@ int decompress1(ErlNifEnv *env, ErlNifBinary *source, ErlNifBinary *target) {
     int bufsize;
     double expansion_factor = 1.1;
     unsigned int result;
-    while(expansion_factor < 2.5) {
+    while(expansion_factor < 6) {
         bufsize = (int) source->size * expansion_factor;
         bufsize = bufsize < 66 ? 66 : bufsize;
         enif_alloc_binary_compat(env, bufsize, target);
@@ -56,7 +56,7 @@ int compress1(ErlNifEnv *env, ErlNifBinary *source, ErlNifBinary *target) {
     int bufsize;
     double expansion_factor = 1.1;
     int result;
-    while(expansion_factor < 2.5) {
+    while(expansion_factor < 6) {
         bufsize = (int) source->size * expansion_factor;
         bufsize = bufsize < 66 ? 66 : bufsize; 
         enif_alloc_binary_compat(env, bufsize, target);
