@@ -3,3 +3,5 @@ src/*.swp
 src/*/*.swp
 c_src/*.o
 priv/*.so
+logs/*
+test/*.beam
