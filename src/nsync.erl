@@ -77,16 +77,16 @@ start_link(Opts) ->
 %%====================================================================
 init([Opts, CallerPid]) ->
     case init_state(Opts, CallerPid) of
-        {ok, State} ->
+        {ok, State = #state{}} ->
             {ok, State};
         Error ->
             {stop, Error}
     end.
 
-handle_call(_Request, _From, State) ->
+handle_call(_Request, _From, State = #state{}) ->
     {reply, ignore, State}.
 
-handle_cast(_Msg, State) ->
+handle_cast(_Msg, State = #state{}) ->
     {noreply, State}.
 
 handle_info({tcp, Socket, Data}, #state{callback=Callback,
@@ -146,7 +146,7 @@ handle_info({tcp_error, _ ,_}, #state{callback=Callback,
             {stop, Error, State}
     end;
 
-handle_info(_Info, State) ->
+handle_info(_Info, State = #state{}) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
@@ -216,6 +216,8 @@ authenticate(Socket, Auth) ->
                     ok;
                 {ok, <<"+OK\r\n">>} ->
                     ok;
+                {ok, Other} ->
+                    {error, {ok, Other}};
                 Error ->
                     Error
             end;
