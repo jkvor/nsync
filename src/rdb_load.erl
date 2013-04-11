@@ -361,14 +361,20 @@ parse_zmap_vals(Data) ->
 
 parse_zmap_entry(<<255>>) ->
     [];
-parse_zmap_entry(<<253, Len:32/little-unsigned, Entries/binary>>) ->
-    <<Entry:Len/binary, Free, ToSkip/binary>> = Entries,
-    <<_:Free/binary, Rest/binary>> = ToSkip,
-    [maybe_int(Entry) | parse_zmap_entry(Rest)];
-parse_zmap_entry(<<Len:8, Entries/binary>>) ->
-    <<Entry:Len/binary, Free, ToSkip/binary>> = Entries,
-    <<_:Free/binary, Rest/binary>> = ToSkip,
-    [maybe_int(Entry) | parse_zmap_entry(Rest)].
+parse_zmap_entry(Zlist) ->
+    {KeyLen, ZlistKey} = zmap_len(Zlist),
+    <<Key:KeyLen/binary, ZlistPartial/binary>> = ZlistKey,
+    {ValLen, <<Free/little-unsigned, ZlistVal/binary>>} = zmap_len(ZlistPartial),
+    ValSize = ValLen-Free,
+    <<Val:ValSize/binary, _:Free/binary, Rest/binary>> = ZlistVal,
+    [maybe_int(Key), maybe_int(Val) | parse_zmap_entry(Rest)].
+
+zmap_len(<<253/little-unsigned, Len:32/little-unsigned, Rest/binary>>) ->
+    {Len, Rest};
+zmap_len(<<Len:8/little-unsigned, Rest/binary>>) ->
+    {Len, Rest}.
+
+
 
 
 maybe_int(Bin) ->
@@ -382,18 +388,19 @@ maybe_int(Bin) ->
 
 parse_zlist_vals(Data) ->
     {ok, Str, Rest1} = rdb_encoded_string_object(Data),
-    <<_ZlBytes:32/little-unsigned,
+    <<ZlBytes:32/little-unsigned,
       _ZlTail:32/little-unsigned,
       ZlLen:16/little-unsigned,
       Entries/binary>> = Str,
+      ZlBytes = byte_size(Entries)+10, % Headers + Entries size
       {ok, parse_zlist_entries(ZlLen, Entries), Rest1}.
 
 parse_zlist_entries(0, <<255>>) ->
     [];
-parse_zlist_entries(Len, <<254:8/unsigned, _Prev:32, Entries/binary>>) ->
+parse_zlist_entries(Len, <<254:8/little-unsigned, _Prev:32, Entries/binary>>) ->
     {Entry, Rest} = parse_zlist_entry(Entries),
     [Entry | parse_zlist_entries(Len-1, Rest)];
-parse_zlist_entries(Len, <<_Prev:8/unsigned, Entries/binary>>) ->
+parse_zlist_entries(Len, <<_Prev:8/little-unsigned, Entries/binary>>) ->
     {Entry, Rest} = parse_zlist_entry(Entries),
     [Entry | parse_zlist_entries(Len-1, Rest)].
 
@@ -402,11 +409,11 @@ parse_zlist_entry(<<0:2, Len:6/little-unsigned, Entries/binary>>) ->
     <<Entry:Len/binary, Rest/binary>> = Entries,
     {Entry, Rest};
 %% String value with length less than or equal to 16383 bytes (14 bits).
-parse_zlist_entry(<<0:1,1:1, Len:14/little-unsigned, Entries/binary>>) ->
+parse_zlist_entry(<<0:1,1:1, Len:14/unsigned, Entries/binary>>) ->
     <<Entry:Len/binary, Rest/binary>> = Entries,
     {Entry, Rest};
 %% String value with length greater than or equal to 16384 bytes.
-parse_zlist_entry(<<1:1,0:1,_:6, Len:32/little-unsigned, Entries/binary>>) ->
+parse_zlist_entry(<<1:1,0:1,_:6, Len:32/unsigned, Entries/binary>>) ->
     <<Entry:Len/binary, Rest/binary>> = Entries,
     {Entry, Rest};
 %% Read next 2 bytes as a 16 bit signed integer
