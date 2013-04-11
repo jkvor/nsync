@@ -361,14 +361,20 @@ parse_zmap_vals(Data) ->
 
 parse_zmap_entry(<<255>>) ->
     [];
-parse_zmap_entry(<<253, Len:32/little-unsigned, Entries/binary>>) ->
-    <<Entry:Len/binary, Free, ToSkip/binary>> = Entries,
-    <<_:Free/binary, Rest/binary>> = ToSkip,
-    [maybe_int(Entry) | parse_zmap_entry(Rest)];
-parse_zmap_entry(<<Len:8, Entries/binary>>) ->
-    <<Entry:Len/binary, Free, ToSkip/binary>> = Entries,
-    <<_:Free/binary, Rest/binary>> = ToSkip,
-    [maybe_int(Entry) | parse_zmap_entry(Rest)].
+parse_zmap_entry(Zlist) ->
+    {KeyLen, ZlistKey} = zmap_len(Zlist),
+    <<Key:KeyLen/binary, ZlistPartial/binary>> = ZlistKey,
+    {ValLen, <<Free/little-unsigned, ZlistVal/binary>>} = zmap_len(ZlistPartial),
+    ValSize = ValLen-Free,
+    <<Val:ValSize/binary, _:Free/binary, Rest/binary>> = ZlistVal,
+    [maybe_int(Key), maybe_int(Val) | parse_zmap_entry(Rest)].
+
+zmap_len(<<253/little-unsigned, Len:32/little-unsigned, Rest/binary>>) ->
+    {Len, Rest};
+zmap_len(<<Len:8/little-unsigned, Rest/binary>>) ->
+    {Len, Rest}.
+
+
 
 
 maybe_int(Bin) ->
